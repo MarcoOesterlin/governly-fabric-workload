@@ -6,12 +6,14 @@ Organizations using Microsoft Fabric need a centralized tool to bulk-apply Micro
 
 ## Approach
 
-A true **Microsoft Fabric Workload** built with the Workload Development Kit (WDK):
+A true **Microsoft Fabric Workload** built on the [Extensibility Toolkit Starter-Kit](https://github.com/microsoft/fabric-extensibility-toolkit):
 
-- **Frontend**: React app using `@ms-fabric/workload-client` SDK + Fluent UI React v9, running inside Fabric's sandboxed iframe
-- **Backend**: Node.js/Express (TypeScript) API service handling business logic, token exchange (OBO), and Fabric/Graph API calls
-- **Authentication**: Seamless — the user is already logged into Fabric; the Fabric SDK provides `acquireAccessToken()` which gives the user's delegated token; the backend uses On-Behalf-Of (OBO) flow to call Fabric Admin and Graph APIs
-- **No separate login page** — users interact with Governly directly from their Fabric workspace
+- **Fork-based**: Fork the Starter-Kit repo, customize with Governly-specific item type, API clients, and UI
+- **Frontend-only (FERemote)**: React SPA running in Fabric's sandboxed iframe — no separate backend service
+- **Fabric UX compliance**: Uses `@fluentui/react-components` (Fluent UI v9) — the prescribed component library for Fabric workloads — following the [Fabric UX Storybook](https://fabricux-c6c9fchnggh3d5dn.b02.azurefd.net/) design patterns and compliance requirements
+- **Direct API calls**: The Fabric host provides delegated tokens via `acquireAccessToken()`; the frontend calls Fabric Admin and Graph APIs directly
+- **Toolkit scripts**: `Setup.ps1` handles app registration, env config, and DevGateway download
+- **No login page** — users interact with Governly directly from their Fabric workspace
 
 ## Architecture
 
@@ -26,94 +28,71 @@ A true **Microsoft Fabric Workload** built with the Workload Development Kit (WD
 │  │  │  Governly Frontend (React)                       │  │  │
 │  │  │  • @ms-fabric/workload-client SDK                │  │  │
 │  │  │  • Fluent UI React v9 components                 │  │  │
-│  │  │  • Item editor for Governly workload items       │  │  │
+│  │  │  • Direct API calls to Fabric Admin + Graph      │  │  │
 │  │  │                                                  │  │  │
 │  │  │  workloadClient.auth.acquireAccessToken()        │  │  │
-│  │  │  → user's delegated token (automatic)            │  │  │
-│  │  └───────────────────┬──────────────────────────────┘  │  │
-│  └──────────────────────┼─────────────────────────────────┘  │
-│                         │ Bearer token                       │
-└─────────────────────────┼────────────────────────────────────┘
-                          ▼
-               ┌───────────────────────────┐       ┌────────────────────┐
-               │  Governly Backend         │       │  Microsoft         │
-               │  (Node.js/Express + TS)   │──OBO─▶│  Entra ID          │
-               │                           │       └────────────────────┘
-               │  1. Validate bearer token │              │
-               │  2. OBO → Fabric API token│              │ OBO tokens
-               │  3. OBO → Graph API token │              │
-               │  4. Call Fabric Admin APIs │◀─────────────┘
-               │  5. Call Graph APIs        │
-               └────────────┬──────────────┘
-                            │
-                ┌───────────┼───────────┐
-                ▼           ▼           ▼
-         Fabric Admin   Fabric REST  MS Graph
-         Labels API     Domains API  Labels API
+│  │  │  → scoped delegated tokens (automatic)           │  │  │
+│  │  └─────────────┬───────────────┬───────────────────┘  │  │
+│  └────────────────┼───────────────┼──────────────────────┘  │
+│                   │               │                          │
+└───────────────────┼───────────────┼──────────────────────────┘
+                    │               │
+        ┌───────────▼───┐   ┌──────▼──────────┐
+        │ Fabric Admin  │   │ MS Graph API    │
+        │ REST APIs     │   │ (sensitivity    │
+        │               │   │  labels)        │
+        │ • bulkSetLabels│  │                 │
+        │ • listItems    │  │ /beta/security/ │
+        │ • domains      │  │ informationPro- │
+        │ • lakehouses   │  │ tection/labels  │
+        └───────────────┘   └─────────────────┘
 ```
+
+**Key difference from the original WDK approach**: No separate backend. The Fabric host provides delegated tokens scoped to the user''s identity. The frontend acquires tokens for different resources (Fabric API, Graph API) and calls them directly. The Fabric Admin APIs check the user''s Fabric Administrator role server-side.
 
 ## Authentication
 
-### How It Works (No Login Required)
+### How It Works (No Login, No Backend, No OBO)
 
 1. The user is already signed into the Fabric portal
 2. When the Governly workload loads in the iframe, it calls `workloadClient.auth.acquireAccessToken()` from the Fabric SDK
-3. This returns a delegated token scoped to Governly's app registration — no popup, no redirect
-4. The frontend sends this token as a Bearer header to the Governly backend
-5. The backend validates the token, then uses **On-Behalf-Of (OBO) flow** to exchange it for:
-   - A Fabric Admin API token (scope: `https://api.fabric.microsoft.com/.default`)
-   - A Graph API token (scope: `https://graph.microsoft.com/.default`)
-6. The backend calls the Fabric/Graph APIs with these OBO tokens on behalf of the user
+3. This returns a delegated token scoped to the requested resource — no popup, no redirect
+4. For Fabric Admin APIs: request a token scoped to `https://analysis.windows.net/powerbi/api/.default`
+5. For Graph APIs: request a token scoped to `https://graph.microsoft.com/.default`
+6. The frontend calls the APIs directly with these tokens as Bearer headers
 
 ### Tenant Discovery
 
-No `TENANTID` is needed in the environment. The `tid` claim from the user's token (received from the Fabric SDK) identifies the tenant. The backend extracts it and uses the tenant-specific authority for OBO token acquisition.
+No `TENANTID` in configuration. The `tid` claim from the user''s token (received from the Fabric SDK) identifies the tenant at runtime.
 
-### Configuration & Secrets Management
+### Configuration
 
-**Production: Azure Key Vault** (required for deployed environments)
+The Extensibility Toolkit uses environment-specific `.env` files generated by `Setup.ps1`:
 
-All secrets are stored in Azure Key Vault and retrieved at startup via `@azure/identity` + `@azure/keyvault-secrets`. The backend uses **DefaultAzureCredential**, which automatically works with:
-- Managed Identity (when deployed to Azure App Service / Container Apps)
-- Azure CLI credentials (when developing locally)
-
-| Key Vault Secret | Purpose |
+| File | Purpose |
 |---|---|
-| `GovernlyClientId` | App registration client ID |
-| `GovernlyClientSecret` | App registration client secret |
-| `GovernlyAudience` | Application ID URI from app registration |
+| `.env.dev` | Local development (frontend URL: `http://localhost:60006/`) |
+| `.env.test` | Testing environment |
+| `.env.prod` | Production deployment |
 
-| Environment Variable (non-secret) | Purpose |
+**Template variables** (populated during setup):
+
+| Variable | Purpose |
 |---|---|
-| `KEYVAULT_URL` | Key Vault URL, e.g. `https://governly-kv.vault.azure.net` |
 | `WORKLOAD_NAME` | `Org.Governly` |
-| `BACKEND_PORT` | Server port (default: `5000`) |
-| `PUBLISHER_TENANT_ID` | Tenant ID for workload registration |
+| `WORKLOAD_VERSION` | Semantic version string |
+| `WORKLOAD_HOSTING_TYPE` | `FERemote` (frontend-only) |
+| `FRONTEND_APPID` | Entra app registration client ID |
+| `FRONTEND_URL` | Frontend URL (localhost for dev, production URL for deploy) |
+| `ITEM_NAMES` | Comma-separated item types: `LabelPolicy` |
+| `LOG_LEVEL` | `debug` / `info` / `warn` |
+| `ENVIRONMENT_DISPLAY_NAME_SUFFIX` | e.g., `(Dev)` for dev builds |
 
-**Local development fallback: `.env` file** (optional, gitignored)
-
-For local development convenience only, the backend falls back to a `.env` file if `KEYVAULT_URL` is not set:
-
-```
-# LOCAL DEV ONLY — do not use in production
-CLIENTID=<app-registration-client-id>
-CLIENTSECRET=<app-registration-client-secret>
-WORKLOAD_NAME=Org.Governly
-BACKEND_PORT=5000
-PUBLISHER_TENANT_ID=<your-tenant-id>
-AUDIENCE=<application-id-uri-from-script>
-```
-
-The backend config loader checks in this order:
-1. If `KEYVAULT_URL` is set → fetch secrets from Key Vault
-2. Otherwise → read from `.env` (local dev mode)
-
-> **Note:** `TENANTID` for API calls is always extracted from the user's token `tid` claim at runtime — never stored in configuration.
-> Run `scripts/CreateGovernlyApp.ps1` to generate the app registration and output all values for either Key Vault or `.env`.
+**No client secret at runtime.** In FERemote mode, tokens come from the Fabric host. The client secret is only used by the setup scripts and DevGateway during development.
 
 ### Required Entra ID App Registration Permissions
 
-These are set automatically by `scripts/CreateGovernlyApp.ps1`:
+These are set by the toolkit''s `CreateDevAADApp.ps1` (extended with Governly-specific permissions):
 
 **Power BI Service / Fabric (delegated)**
 | Permission | Purpose |
@@ -138,16 +117,16 @@ These are set automatically by `scripts/CreateGovernlyApp.ps1`:
 **Exposed scopes (on the app itself)**
 | Scope | Purpose |
 |---|---|
-| `FabricWorkloadControl` | Fabric ↔ backend communication |
+| `FabricWorkloadControl` | Fabric ↔ workload communication |
 | `LabelPolicy.Read.All` | Read Governly items |
 | `LabelPolicy.ReadWrite.All` | Read/write Governly items |
 
-> **Note:** The Fabric Admin APIs (`/v1/admin/items/bulkSetLabels`, `/v1/admin/domains`) are gated by the user's **Fabric Administrator role**, not by OAuth scopes. The OBO token carries the user's identity — Fabric checks their admin role server-side.
+> **Note:** The Fabric Admin APIs (`/v1/admin/items/bulkSetLabels`, `/v1/admin/domains`) are gated by the user''s **Fabric Administrator role**, not by OAuth scopes. The delegated token carries the user''s identity — Fabric checks their admin role server-side.
 
 ### Multi-User Support
 
-- **No sessions or cookies needed** — Fabric manages the user's session
-- **Per-user permissions** — each user's OBO token carries their own Fabric RBAC permissions
+- **No sessions or cookies needed** — Fabric manages the user''s session
+- **Per-user permissions** — each user''s token carries their own Fabric RBAC permissions
 - **Fabric enforces authorization** — non-admin users cannot perform admin-only operations (e.g., bulkSetLabels returns `InsufficientUsageRights`)
 
 ## Fabric APIs Used
@@ -169,7 +148,7 @@ Body: { items: [{id, type}], labelId, assignmentMethod }
 - Up to 2,000 items per request
 - 25 requests/hour rate limit
 - User must be Fabric Administrator with label in their policy
-- Requires delegated user token (via OBO)
+- Requires delegated user token
 
 ### 3. Bulk Remove Labels from Items
 ```
@@ -209,7 +188,7 @@ GET https://graph.microsoft.com/beta/security/informationProtection/sensitivityL
 
 ### Bootstrap & Initialization
 
-The frontend follows the WDK pattern with two initialization modes:
+The frontend follows the Extensibility Toolkit pattern with two initialization modes:
 
 - **UI mode**: Visible iframe rendering the Governly editor and pages
 - **Worker mode**: Invisible iframe handling Fabric-initiated actions (e.g., "Create Governly Item")
@@ -217,8 +196,8 @@ The frontend follows the WDK pattern with two initialization modes:
 ```typescript
 // index.ts
 bootstrap({
-  initializeWorker: (params) => import('./index.worker').then(({ initialize }) => initialize(params)),
-  initializeUI: (params) => import('./index.ui').then(({ initialize }) => initialize(params)),
+  initializeWorker: (params) => import(''./index.worker'').then(({ initialize }) => initialize(params)),
+  initializeUI: (params) => import(''./index.ui'').then(({ initialize }) => initialize(params)),
 });
 ```
 
@@ -231,9 +210,11 @@ The frontend manifest (`Product.json`) defines how Governly appears in Fabric:
 - Create Hub entry: "Governly Label Policy" card under a "Governance" category
 - Item editor: The main Governly UI for browsing and labeling
 
-### Pages (rendered as item editor tabs/views)
+### Pages (rendered as item editor views)
 
-#### 1. Dashboard (default view)
+The editor uses the `useViewNavigation()` hook and static view arrays per the toolkit''s architecture:
+
+#### 1. Dashboard (EMPTY view → onboarding, DEFAULT view → dashboard)
 - Summary cards: total domains, total items, items without labels, items by label
 - Quick-action buttons to jump to labeling workflows
 
@@ -252,9 +233,9 @@ The frontend manifest (`Product.json`) defines how Governly appears in Fabric:
 - Pagination controls (API returns up to 10,000 per page)
 
 #### 4. Lakehouse Explorer Tab
-- Two-panel layout:
-  - Left: workspace selector → lakehouse selector (cascading dropdowns)
-  - Right: table list for the selected lakehouse
+- Two-panel layout using `ItemEditorDefaultView`:
+  - Left panel: workspace selector → lakehouse selector (cascading dropdowns)
+  - Center panel: table list for the selected lakehouse
 - Table columns: Name, Type (Managed/External), Format
 - Read-only view for v1 (column-level labeling deferred)
 
@@ -265,37 +246,78 @@ The frontend manifest (`Product.json`) defines how Governly appears in Fabric:
 
 ### Shared Components
 
-- **LabelPicker**: Fluent UI `Combobox` or `Dropdown` populated from Graph API, showing label hierarchy
+- **LabelPicker**: Fabric `Dropdown` (combobox mode) populated from Graph API, showing label hierarchy with color indicators
 - **BulkActionBar**: Sticky bottom bar appearing when items are selected, showing count + action buttons
-- **BatchProgressDialog**: Modal showing real-time progress of bulk operations (success/fail per item)
-- **ConfirmationDialog**: Shown before any destructive or bulk operation
+- **BatchProgressDialog**: Fabric `Dialog` + `ProgressBar` showing real-time progress of bulk operations (success/fail per item)
+- **ConfirmationDialog**: Fabric `Dialog` shown before any destructive or bulk operation
+- **EmptyState**: Follows Fabric UX empty-state pattern for first-run onboarding
 
-## Workload Backend (Node.js/Express + TypeScript)
+### Ribbon (Toolbar)
 
-### Responsibilities
+Per the toolkit''s mandatory pattern, the editor defines:
+- `homeToolbarActions`: Save, Settings (mandatory)
+- `additionalToolbars`: "Label Operations" toolbar with Apply/Remove bulk actions
+- All `ToolbarButton` components wrapped in `Tooltip` (per toolkit convention)
 
-1. **Token validation**: Validate bearer tokens from the frontend (issuer, audience, signature, lifetime)
-2. **OBO token exchange**: Exchange the user's workload token for Fabric API / Graph API tokens using MSAL Node `ConfidentialClientApplication.acquireTokenOnBehalfOf()`
-3. **Fabric API proxy**: Call Fabric Admin APIs (items, labels, domains) on behalf of the user
-4. **Graph API proxy**: Call MS Graph for available sensitivity labels
-5. **Rate limit management**: Queue and batch bulk operations, respect `Retry-After` headers
-6. **Workload control plane**: Handle Fabric lifecycle events (create/read/update/delete workload items) via SubjectAndAppToken validation
+## Fabric UX Framework Compliance
 
-### API Endpoints
+Governly must follow the [Fabric UX Storybook](https://fabricux-c6c9fchnggh3d5dn.b02.azurefd.net/) guidelines. The implementation uses `@fluentui/react-components` (Fluent UI v9) — the prescribed component library per the Extensibility Toolkit. The Fabric UX Storybook serves as the **design reference** for patterns, layout, and compliance.
 
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/api/items` | List Fabric items (proxied with OBO token) |
-| GET | `/api/domains` | List Fabric domains |
-| PATCH | `/api/domains/:domainId` | Update domain default label |
-| POST | `/api/labels/set` | Bulk set labels on items |
-| POST | `/api/labels/remove` | Bulk remove labels from items |
-| GET | `/api/labels` | List available sensitivity labels (Graph API) |
-| GET | `/api/workspaces` | List workspaces |
-| GET | `/api/lakehouses/:workspaceId/:lakehouseId/tables` | List lakehouse tables |
-| POST | `/api/workload/create` | Fabric control plane: create item |
-| GET | `/api/workload/:itemId` | Fabric control plane: read item |
-| DELETE | `/api/workload/:itemId` | Fabric control plane: delete item |
+### Component Mapping
+
+| Governly Feature | Fabric Component(s) |
+|---|---|
+| Data tables (Items, Domains) | `SimpleTable` with sortable columns |
+| Label selection | `Dropdown` (combobox mode) with `OptionGroup` for label hierarchy |
+| Bulk action toolbar | `Button`, `SplitButton`, `Tooltip` |
+| Confirmation/progress modals | `Dialog`, `DialogBody`, `ProgressBar` |
+| Status indicators | `Badge`, `CounterBadge`, `Tag` |
+| Summary cards (dashboard) | `Card`, `CardHeader`, `CardFooter` |
+| Navigation between tabs | `Tablist`, `Tab` |
+| Lakehouse tree | `Tree`, `TreeItem` |
+| Search/filter | `SearchBox`, `FilterPill` |
+| Notifications | `MessageBar` (inline), toolkit `NotificationController` (toast) |
+| Loading states | `Spinner`, `ProgressBar` |
+| Onboarding (first run) | Fabric UX empty-state pattern with `TeachingBubble` |
+| Form fields | `Field`, `TextInput`, `Checkbox`, `Switch`, `Radio`/`RadioGroup` |
+
+### UX Patterns to Follow
+
+Per the Fabric UX Storybook patterns section:
+
+1. **Empty states**: When no items/domains are loaded yet, show a purposeful empty state with illustration, description, and a call-to-action — per the Fabric empty-state pattern
+2. **Item creation**: Governly items follow the standard Fabric item-creation flow (Create Hub card → empty editor → onboarding)
+3. **Notifications**: Use `MessageBar` for inline status (success/error after bulk ops) and the toolkit's `callNotificationOpen()` for toast notifications
+4. **Onboarding**: First-time users see a guided experience explaining what Governly does and how to use it — using `TeachingBubble` for progressive disclosure
+5. **Progress**: Bulk operations show determinate `ProgressBar` with item counts — follows the Fabric progress pattern
+6. **Compliance requirements**: Must meet all Fabric UX compliance checklist items (accessibility, theming, responsive layout, error handling)
+
+## API Clients (Frontend)
+
+Instead of a separate backend, the frontend uses typed API client classes (following the Starter-Kit''s `clients/` pattern):
+
+### GovernlyAdminClient.ts
+Handles all Fabric Admin API calls:
+- `listItems(filters?)` → paginated item list with `continuationToken` handling
+- `bulkSetLabels(items, labelId, assignmentMethod)` → with rate limit awareness
+- `bulkRemoveLabels(items)` → with rate limit awareness
+- `listDomains()` → all tenant domains
+- `updateDomain(domainId, patch)` → update domain default label
+
+### GovernlyGraphClient.ts
+Handles Graph API calls:
+- `listSensitivityLabels()` → all available labels with hierarchy
+
+### GovernlyLakehouseClient.ts
+Handles Lakehouse table listing:
+- `listTables(workspaceId, lakehouseId)` → paginated table list
+
+All clients acquire tokens via the Fabric SDK:
+```typescript
+const token = await workloadClient.auth.acquireAccessToken({
+  additionalScopesToConsent: [''https://analysis.windows.net/powerbi/api/.default'']
+});
+```
 
 ## Rate Limit Handling
 
@@ -303,87 +325,112 @@ The Fabric Admin APIs have strict rate limits:
 - `bulkSetLabels` / `bulkRemoveLabels`: 25 requests/hour, 2,000 items/request → max 50,000 items/hour
 - `listItems`: 200 requests/hour
 
-Strategy:
+Strategy (handled in the frontend API clients):
 - Queue bulk operations and process in batches
 - Show estimated time for large operations
 - Respect `Retry-After` headers from 429 responses
 - Display a progress bar with batch status
+- Track operations in the `LabelPolicy` item definition for persistence across sessions
 
 ## Project Structure
 
 ```
-governly-fabric-workload/
-├── .env                              # Backend environment config
-├── package.json                      # Monorepo root (workspaces)
-├── tsconfig.base.json                # Shared TypeScript config
+governly-fabric-workload/           # Forked from microsoft/fabric-extensibility-toolkit
+├── .env.dev                        # Dev config (generated by Setup.ps1)
+├── .env.test                       # Test config
+├── .env.prod                       # Production config
+├── .env.template                   # Template with {{PLACEHOLDERS}}
+├── .gitignore
+├── README.md
 │
-├── frontend/                         # Fabric Workload Frontend
+├── Workload/                       # React frontend (Fabric workload SPA)
 │   ├── package.json
 │   ├── tsconfig.json
-│   ├── webpack.config.js             # Dev server on port 60006
-│   ├── Package/                      # Workload manifest files
-│   │   ├── Product.json              # Workload definition (name, icons, item types)
-│   │   ├── Item.json                 # Item type definition (Org.Governly.LabelPolicy)
-│   │   └── assets/                   # Icons and images
-│   └── src/
-│       ├── index.ts                  # Bootstrap (UI + Worker modes)
-│       ├── index.ui.tsx              # UI mode initialization (React render)
-│       ├── index.worker.ts           # Worker mode (action handlers)
-│       ├── App.tsx                   # Route → component mapping
-│       ├── controller/
-│       │   ├── GovernlyController.ts # SDK + backend API orchestration
-│       │   └── AuthController.ts     # acquireAccessToken wrapper
-│       ├── components/
-│       │   ├── editor/
-│       │   │   └── GovernlyEditor.tsx    # Main item editor (tabbed UI)
-│       │   ├── dashboard/
-│       │   │   └── Dashboard.tsx
-│       │   ├── domains/
-│       │   │   └── DomainTable.tsx
-│       │   ├── items/
-│       │   │   └── ItemTable.tsx
-│       │   ├── lakehouses/
-│       │   │   └── TableList.tsx
-│       │   ├── labels/
-│       │   │   └── LabelsReference.tsx
-│       │   └── shared/
-│       │       ├── LabelPicker.tsx
-│       │       ├── BulkActionBar.tsx
-│       │       ├── BatchProgressDialog.tsx
-│       │       └── ConfirmationDialog.tsx
-│       ├── models/
-│       │   ├── FabricTypes.ts        # Fabric API type definitions
-│       │   └── GraphTypes.ts         # Graph API type definitions
-│       └── hooks/
-│           ├── useFabricItems.ts
-│           ├── useDomains.ts
-│           ├── useLabels.ts
-│           └── useBulkOperation.ts
+│   ├── webpack.config.js
+│   │
+│   ├── Manifest/
+│   │   ├── WorkloadManifest.xml    # Workload identity & hosting config
+│   │   ├── Product.json            # Workload metadata (name, icons, cards)
+│   │   ├── assets/
+│   │   │   ├── images/             # Workload & item icons
+│   │   │   └── locales/            # i18n strings (en-US)
+│   │   └── items/
+│   │       └── LabelPolicyItem/
+│   │           ├── LabelPolicyItem.xml   # Item backend manifest
+│   │           └── LabelPolicyItem.json  # Item frontend manifest
+│   │
+│   ├── app/
+│   │   ├── index.ts                # Bootstrap (UI + Worker modes)
+│   │   ├── index.ui.tsx            # UI mode initialization
+│   │   ├── index.worker.ts         # Worker mode (action handlers)
+│   │   ├── App.tsx                 # Route → component mapping
+│   │   ├── theme.tsx               # Fluent UI v9 theme
+│   │   ├── constants.ts
+│   │   ├── i18n.js                 # Internationalization
+│   │   │
+│   │   ├── clients/                # API client classes
+│   │   │   ├── GovernlyAdminClient.ts      # Fabric Admin APIs
+│   │   │   ├── GovernlyGraphClient.ts      # Graph API (labels)
+│   │   │   ├── GovernlyLakehouseClient.ts  # Lakehouse tables
+│   │   │   ├── FabricPlatformClient.ts     # (from Starter-Kit)
+│   │   │   └── FabricPlatformScopes.ts     # (from Starter-Kit)
+│   │   │
+│   │   ├── controller/             # SDK abstractions
+│   │   │   ├── ItemCRUDController.ts       # (from Starter-Kit)
+│   │   │   ├── AuthenticationController.ts # (from Starter-Kit)
+│   │   │   └── NotificationController.ts   # (from Starter-Kit)
+│   │   │
+│   │   ├── items/
+│   │   │   └── LabelPolicyItem/
+│   │   │       ├── index.ts
+│   │   │       ├── LabelPolicyItemDefinition.ts  # Item shape
+│   │   │       ├── LabelPolicyItemEditor.tsx     # Main editor (MANDATORY)
+│   │   │       ├── LabelPolicyItemEmptyView.tsx  # Onboarding view
+│   │   │       ├── LabelPolicyItemDefaultView.tsx # Dashboard view
+│   │   │       ├── LabelPolicyItemRibbon.tsx     # Toolbar actions
+│   │   │       ├── DomainsView.tsx               # Domains tab
+│   │   │       ├── ItemsView.tsx                 # Items tab
+│   │   │       ├── LakehouseView.tsx             # Lakehouse tab
+│   │   │       └── LabelsView.tsx                # Labels reference tab
+│   │   │
+│   │   ├── components/             # Shared components
+│   │   │   ├── LabelPicker.tsx
+│   │   │   ├── BulkActionBar.tsx
+│   │   │   ├── BatchProgressDialog.tsx
+│   │   │   ├── ConfirmationDialog.tsx
+│   │   │   └── ItemEditor/         # (from Starter-Kit, mandatory)
+│   │   │
+│   │   ├── models/
+│   │   │   ├── FabricTypes.ts
+│   │   │   └── GraphTypes.ts
+│   │   │
+│   │   ├── hooks/
+│   │   │   ├── useFabricItems.ts
+│   │   │   ├── useDomains.ts
+│   │   │   ├── useLabels.ts
+│   │   │   └── useBulkOperation.ts
+│   │   │
+│   │   └── assets/                 # Icons, images
+│   │
+│   └── devServer/                  # Local dev server (from Starter-Kit)
 │
-├── backend/                          # Workload Backend API
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── src/
-│       ├── index.ts                  # Express server entry point
-│       ├── config.ts                 # Config loader (Key Vault → .env fallback)
-│       ├── middleware/
-│       │   ├── auth.ts               # Token validation middleware
-│       │   └── errorHandler.ts       # Global error handler
-│       ├── services/
-│       │   ├── AuthService.ts        # OBO token exchange via MSAL Node
-│       │   ├── FabricService.ts      # Fabric Admin API client
-│       │   ├── GraphService.ts       # Graph API client (sensitivity labels)
-│       │   ├── LabelService.ts       # Bulk label operations with batching
-│       │   └── WorkloadService.ts    # Fabric control plane handlers
-│       ├── routes/
-│       │   ├── items.ts
-│       │   ├── domains.ts
-│       │   ├── labels.ts
-│       │   ├── lakehouses.ts
-│       │   └── workload.ts           # Fabric control plane routes
-│       └── types/
-│           ├── fabric.ts
-│           └── auth.ts
+├── scripts/
+│   ├── Setup/
+│   │   ├── Setup.ps1               # Master setup (from Starter-Kit)
+│   │   ├── SetupWorkload.ps1       # Config generation
+│   │   ├── SetupDevEnvironment.ps1 # Dev workspace config
+│   │   ├── CreateDevAADApp.ps1     # Entra app registration
+│   │   └── CreateNewItem.ps1       # Scaffold new item types
+│   ├── Run/
+│   │   ├── StartDevServer.ps1
+│   │   └── StartDevGateway.ps1
+│   └── Build/
+│       ├── BuildFrontend.ps1
+│       ├── BuildManifestPackage.ps1
+│       └── BuildAll.ps1
+│
+├── tools/
+│   └── DevGateway/                 # Downloaded by setup
 │
 └── docs/
     └── superpowers/
@@ -393,266 +440,89 @@ governly-fabric-workload/
 
 ## Dependencies
 
-### Frontend
+### Frontend (Workload/package.json) — inherited from Starter-Kit + Governly additions
 | Package | Purpose |
 |---|---|
-| `react`, `react-dom` | UI library |
-| `@ms-fabric/workload-client` | Fabric Workload SDK (iframe bootstrap, auth, navigation) |
-| `@fluentui/react-components` | Fluent UI v9 components |
-| `@fluentui/react-icons` | Fluent icons |
-| `webpack`, `webpack-cli`, `webpack-dev-server` | Dev server and bundling |
-| `typescript`, `ts-loader` | TypeScript compilation |
+| `react` (18.x), `react-dom` | UI library |
+| `@ms-fabric/workload-client` (^3.1.1) | Fabric Workload SDK (bootstrap, auth, navigation) |
+| `@fluentui/react-components` (^9.7.2) | Fluent UI v9 — primary component library for Fabric workloads |
+| `@fluentui/react-icons` (2.0.226) | Fluent icons |
+| `@reduxjs/toolkit`, `react-redux` | State management |
+| `react-router-dom` | Client-side routing |
+| `i18next`, `react-i18next` | Internationalization |
+| `webpack` (5.x), `webpack-cli`, `webpack-dev-server` | Bundling and dev server |
+| `typescript` (5.x), `ts-loader` | TypeScript compilation |
+| `sass`, `sass-loader` | SCSS styles |
 
-### Backend
-| Package | Purpose |
-|---|---|
-| `express` | HTTP server |
-| `@azure/msal-node` | OBO token exchange (ConfidentialClientApplication) |
-| `@azure/identity` | DefaultAzureCredential for Key Vault access |
-| `@azure/keyvault-secrets` | Retrieve secrets from Azure Key Vault |
-| `jsonwebtoken`, `jwks-rsa` | Token validation |
-| `cors` | CORS for frontend ↔ backend |
-| `dotenv` | Local dev fallback config |
-| `typescript`, `tsx` | TypeScript runtime |
+No backend dependencies — all API calls happen from the frontend using Fabric-provided tokens.
 
 ## Development Workflow
 
-1. **Enable workload development** in Fabric Admin Portal (tenant setting)
-2. **Enable Fabric Developer Mode** in user settings
-3. **Start the frontend**: `cd frontend && npm start` → runs on `localhost:60006`
-4. **Start the backend**: `cd backend && npm run dev` → runs on configured port
-5. **Run DevGateway**: Connect local backend to Fabric workspace
-6. **Open Fabric** → workspace → Create → "Governly Label Policy" → opens embedded editor
-
-## Setup for New Organizations
-
-When another organization wants to deploy Governly:
-
-1. **Create an App Registration** in their Entra ID tenant
-2. **Add API permissions** (delegated): Fabric `Tenant.ReadWrite.All`, `Lakehouse.Read.All`; Graph `InformationProtectionPolicy.Read`
-3. **Create a client secret**
-4. **Configure redirect URI** for the workload
-5. **Admin consent** — tenant admin grants permissions
-6. **Deploy the backend** (Azure App Service, container, etc.) with their .env values
-7. **Register the workload** in their Fabric tenant via DevGateway or publish to Workload Hub
-8. Users open Fabric → workspace → Create → "Governly Label Policy" → start labeling
+1. **Fork the Starter-Kit** and clone locally
+2. **Run Setup.ps1** — creates app registration, generates `.env.dev`, downloads DevGateway
+3. **Create the LabelPolicy item** — `CreateNewItem.ps1 -ItemName "LabelPolicy" -srcItemName "HelloWorld"`
+4. **Enable workload development** in Fabric Admin Portal
+5. **Enable Fabric Developer Mode** in user settings
+6. **Start DevServer**: `scripts/Run/StartDevServer.ps1` → serves frontend on `localhost:60006`
+7. **Start DevGateway**: `scripts/Run/StartDevGateway.ps1` → registers workload with Fabric
+8. **Open Fabric** → workspace → Create → "Governly Label Policy" → opens embedded editor
 
 ## Deployment Guide
-
-There are three deployment scenarios: local development, sharing with specific organizations, and publishing to all Fabric users.
 
 ### Scenario 1: Local Development (Your Own Workspace)
 
 #### Prerequisites
 - A Microsoft Fabric subscription with an **F or P SKU capacity** (trial capacities also work)
-- **Admin permissions** on the Fabric workspace you'll develop in
-- **Node.js** (v18+) and **npm** (v9+) installed
-- The **DevGateway** tool downloaded from [Microsoft](https://go.microsoft.com/fwlink/?linkid=2272516) and extracted locally
-- A **Global Administrator** or **Application Administrator** role in your Entra ID tenant (for app registration)
+- **Admin permissions** on the Fabric workspace
+- **Node.js** (v18+), **npm** (v9+), **PowerShell 7+**
+- A **Global Administrator** or **Application Administrator** role in Entra ID (for app registration)
 
-#### Step 1: Enable Workload Development in Fabric
+#### Steps
 
-1. Sign into [Microsoft Fabric](https://app.fabric.microsoft.com) as a **tenant admin**
-2. Go to **Settings → Admin portal → Tenant settings**
-3. Under **Additional workloads**, enable **"Workspace admins can develop partner workloads"**
-   - Can be scoped to specific security groups if needed
-4. Go to **Settings → Developer settings** and enable **"Fabric Developer Mode"**
+1. **Fork and clone** the repository
+2. **Run Setup.ps1**:
+   ```powershell
+   cd scripts/Setup
+   .\SetupWorkload.ps1 -WorkloadName "Org.Governly"
+   ```
+   This will:
+   - Create the Entra app registration with all required permissions
+   - Generate `.env.dev` with correct config
+   - Run `npm install`
+   - Download DevGateway
+   - Build the manifest package
 
-#### Step 2: Create the Entra ID App Registration (via script)
-
-Governly includes a PowerShell script (`scripts/CreateGovernlyApp.ps1`) based on the official WDK pattern. It automates all app registration setup in one command.
-
-**Prerequisites:** [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) installed and on your PATH.
-
-**Run the script:**
-```powershell
-cd scripts
-.\CreateGovernlyApp.ps1 -tenantId "<your-tenant-id>"
-```
-
-The script will:
-1. Sign you into Azure via `az login`
-2. Create a multi-tenant Entra ID app registration named "Governly Workload"
-3. Configure the **Application ID URI**: `api://localdevinstance/<tenantId>/Org.Governly/<random>`
-4. Set the **Redirect URI**: `http://localhost:60006/close` (SPA)
-5. **Expose API scopes**:
-   - `FabricWorkloadControl` — for Fabric ↔ backend communication
-   - `LabelPolicy.Read.All` — for reading Governly label policy items
-   - `LabelPolicy.ReadWrite.All` — for reading/writing Governly label policy items
-6. **Pre-authorize Fabric client apps** so users don't see extra consent prompts:
-   - `871c010f-5e61-4fb1-83ac-98610a7e9110` (Fabric frontend)
-   - `00000009-0000-0000-c000-000000000000` (Power BI Service / Fabric backend)
-   - `d2450708-699c-41e3-8077-b0c8341509aa` (Fabric backend operations)
-7. **Add API permissions** (delegated):
-   - Power BI Service: `Fabric.Extend`, `Workspace.Read.All`, `Item.Read.All`, `Item.ReadWrite.All`, `Lakehouse.Read.All`
-   - Microsoft Graph: `User.Read`, `InformationProtectionPolicy.Read`
-   - Azure Storage: `user_impersonation`
-8. Add the `idtyp` optional claim (for app-only token validation)
-9. Generate a **client secret** (valid 180 days)
-
-**Output — copy these values:**
-```
-ApplicationIdUri / Audience : api://localdevinstance/<tenantId>/Org.Governly/AbC
-RedirectURI                 : http://localhost:60006/close
-Application Id              : <guid>
-Secret                      : <secret-value>
-```
-
-**Grant admin consent** (tenant admin must do this once):
-The script prints a consent URL. Open it in a browser as a tenant admin:
-```
-https://login.microsoftonline.com/<tenantId>/adminconsent?client_id=<applicationId>
-```
-
-#### Step 3: Configure Governly
-
-1. Clone the Governly repository:
-   ```bash
-   git clone https://github.com/<your-org>/governly-fabric-workload.git
-   cd governly-fabric-workload
+3. **Grant admin consent** (tenant admin opens the URL printed by setup):
+   ```
+   https://login.microsoftonline.com/<tenantId>/adminconsent?client_id=<appId>
    ```
 
-2. Create the `.env` file in the project root using the script's output (for local dev only):
+4. **Enable workload dev** in Fabric Admin Portal → Tenant settings → "Workspace admins can develop partner workloads"
+
+5. **Enable Developer Mode** in Fabric → Settings → Developer settings
+
+6. **Start development**:
+   ```powershell
+   # Terminal 1: Frontend
+   scripts/Run/StartDevServer.ps1
+   
+   # Terminal 2: DevGateway
+   scripts/Run/StartDevGateway.ps1
    ```
-   CLIENTID=<Application Id from script>
-   CLIENTSECRET=<Client Secret from script>
-   WORKLOAD_NAME=Org.Governly
-   BACKEND_PORT=5000
-   PUBLISHER_TENANT_ID=<your-tenant-id>
-   AUDIENCE=<ApplicationIdUri from script>
-   ```
 
-   The `CreateGovernlyApp.ps1` script prints the exact `.env` block — just copy and paste it.
+7. **Open Fabric** → workspace → Create → "Governly Label Policy"
 
-   > For production deployment, store `CLIENTID`, `CLIENTSECRET`, and `AUDIENCE` in Azure Key Vault instead. See the Deployment Guide Scenario 2.
+### Scenario 2: Preview Audience (Specific Organizations)
 
-#### Step 4: Run Governly Locally
+1. Build the production bundle: `scripts/Build/BuildAll.ps1`
+2. Deploy the built frontend to a static hosting service (Azure Static Web Apps, Blob Storage + CDN)
+3. Update `.env.prod` with the production frontend URL
+4. Rebuild the manifest package
+5. Use the Fabric Workload Management API or partner portal to register the workload
+6. Target organizations can enable the workload in their Fabric Admin Portal
 
-You need **three terminal windows** running simultaneously:
+### Scenario 3: Workload Hub (All Fabric Tenants)
 
-**Terminal 1 — Frontend** (serves the workload UI at `localhost:60006`):
-```bash
-cd frontend
-npm install
-npm start
-```
-Verify: open `http://localhost:60006/manifests` — you should see the workload manifest JSON.
-
-**Terminal 2 — Backend** (serves the API):
-```bash
-cd backend
-npm install
-npm run dev
-```
-Verify: the backend starts on the configured port (default 5000).
-
-**Terminal 3 — DevGateway** (bridges your local machine to Fabric):
-
-1. Create `workload-dev-mode.json`:
-   ```json
-   {
-     "WorkspaceGuid": "<your-fabric-workspace-id>",
-     "ManifestPackageFilePath": "<path-to-generated-manifest-package>"
-   }
-   ```
-2. Run:
-   ```bash
-   .\Microsoft.Fabric.Workload.DevGateway.exe
-   ```
-   Wait for the message: `info: DevGateway started`.
-
-#### Step 5: Use Governly in Fabric
-
-1. Open [Microsoft Fabric](https://app.fabric.microsoft.com)
-2. Navigate to your development workspace
-3. Click **+ New item**
-4. Under the Governly section, select **"Governly Label Policy"**
-5. The Governly editor opens inside Fabric — browse items, domains, and apply labels
-
----
-
-### Scenario 2: Share With Specific Organizations (Preview Audience)
-
-Once Governly works locally, you can share it with up to 10 other Fabric tenants for testing.
-
-#### Step 1: Register Your Workload
-
-1. Fill out the [Workload Registration Form](https://aka.ms/fabric_workload_registration) with:
-   - **Publisher tenant**: Your production Fabric tenant ID
-   - **Workload ID**: `Org.Governly` (this cannot be changed later)
-2. Wait for Microsoft to approve the registration
-
-#### Step 2: Host the Backend
-
-Deploy the Governly backend to a publicly accessible endpoint:
-
-- **Azure App Service** (recommended): Deploy the Node.js/Express app
-- **Azure Container Apps**: Deploy as a Docker container
-- **Any cloud provider**: As long as it's HTTPS and accessible from Fabric
-
-**Secrets configuration:**
-1. Create an Azure Key Vault (e.g. `governly-kv`)
-2. Store the app registration secrets: `GovernlyClientId`, `GovernlyClientSecret`, `GovernlyAudience`
-3. Enable **Managed Identity** on the App Service / Container App
-4. Grant the managed identity `Key Vault Secrets User` role on the Key Vault
-5. Set the `KEYVAULT_URL` environment variable in the hosting platform (e.g. `https://governly-kv.vault.azure.net`)
-
-Update the workload manifest to point to the production backend URL instead of `localhost`.
-
-#### Step 3: Upload the Workload Manifest
-
-1. Build the manifest NuGet package (includes frontend manifests + backend manifest)
-2. Upload it via the Fabric Admin Portal → **Manage workloads**
-
-#### Step 4: Add Preview Tenants
-
-1. In the Fabric Admin Portal, add up to **10 tenant IDs** to the preview audience
-2. Each target tenant's admin must enable the workload in their **Tenant settings → Additional workloads**
-3. Users in those tenants can now find Governly in their workspace's **+ New item** menu
-
-#### What Each Target Organization Needs to Do
-
-The target organization does **NOT** need to:
-- ❌ Clone the Governly repo
-- ❌ Run any code locally
-- ❌ Create their own app registration (your app registration handles multi-tenant auth)
-
-The target organization **DOES** need to:
-- ✅ Have a Fabric tenant with F or P SKU capacity
-- ✅ Have their tenant admin enable the Governly workload in tenant settings
-- ✅ Have their tenant admin grant consent to the Governly app (one-time popup)
-- ✅ Users must be Fabric Administrators to use bulk label operations
-
----
-
-### Scenario 3: Publish to All Fabric Users (Workload Hub)
-
-This makes Governly available to every Fabric customer worldwide.
-
-1. Ensure Governly meets the [Workload Publishing Requirements](https://learn.microsoft.com/en-us/fabric/workload-development-kit/publish-workload-requirements)
-2. Submit the [Publishing Request Form](https://aka.ms/fabric_workload_publishing)
-3. Microsoft validates your workload against their certification requirements
-4. Once approved, Governly appears in the **Workload Hub** for all Fabric tenants
-5. Users can browse, trial, and add Governly from the hub
-
----
-
-### Multi-Tenant App Registration (for Scenarios 2 & 3)
-
-When sharing beyond your own tenant, update the app registration:
-
-1. Change **Supported account types** to "Accounts in any organizational directory" (multi-tenant)
-2. The `AUDIENCE` URI changes from `api://localdevinstance/...` to a production URI:
-   ```
-   api://<your-domain>/Org.Governly
-   ```
-3. Update redirect URIs to your production frontend URL
-4. Each organization's admin will see a consent popup on first use — no manual setup required
-
-## Deferred (Out of Scope for v1)
-
-- Column-level sensitivity labels on lakehouse tables (requires Purview Data Map or future Fabric API)
-- Audit logging / operation history
-- Scheduled/automated label application
-- Role-based access within Governly itself
-- Publishing to Fabric Workload Hub (requires Microsoft certification)
+1. Complete the Microsoft Fabric workload certification process
+2. Submit to the Workload Hub via the partner portal
+3. Once approved, any Fabric tenant can enable Governly from the Workload Hub
