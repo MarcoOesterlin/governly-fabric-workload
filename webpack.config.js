@@ -20,7 +20,7 @@ module.exports = {
     output: {
         filename: "bundle.[fullhash].js",
         path: path.resolve(__dirname, "dist"),
-        publicPath: '/',
+        publicPath: process.env.PUBLIC_PATH || '/',
     },
     plugins: [
         new CleanWebpackPlugin(),
