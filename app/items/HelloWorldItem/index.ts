@@ -1,1 +1,0 @@
-export { HelloWorldItemEditor } from './HelloWorldItemEditor';
