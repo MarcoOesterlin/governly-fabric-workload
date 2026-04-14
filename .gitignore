@@ -1,18 +1,26 @@
-# Environment / secrets
+# Environment / secrets — never commit
 .env
 .env.*
+.env.dev
+.env.test
+.env.prod
 !.env.example
 
 # Dependencies
 node_modules/
+Workload/node_modules/
 
 # Build output
 dist/
 build/
 out/
+Workload/build/
 
-# Fabric DevGateway
-DevGateway/
+# DevGateway binary
+tools/
+
+# Test coverage
+coverage/
 
 # Worktrees
 .worktrees/
@@ -22,5 +30,5 @@ DevGateway/
 Thumbs.db
 
 # Editor
-.vscode/settings.json
+.vscode/
 .idea/
