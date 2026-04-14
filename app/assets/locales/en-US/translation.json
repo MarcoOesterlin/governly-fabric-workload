@@ -6,7 +6,7 @@
     "Item_About_Label": "About",
     "Item_Description_Label": "Description",
     "Workspace_ID_Label": "Workspace Id",
-    "Workspace_Name_Label": "Workspace Name",    
+    "Workspace_Name_Label": "Workspace Name",
     "Language_Changed_Title": "Language Changed",
     "Language_Changed_Message": "The language is currently:",
     "Default_Language_Title": "Language is default",
@@ -17,9 +17,68 @@
     "ItemEditor_Saved_Notification_Text": "{{itemName}} saved successfully.",
     "ItemEditor_SaveFailed_Notification_Title": "Save failed",
     "ItemEditor_SaveFailed_Notification_Text": "Failed to save {{itemName}}.",
-    "HelloWorldItemEditor_Title": "Hello World Item Editor",
-    "HelloWorldItemEditor_Definition_Message_Label": "Item Definition",
-    "HelloWorldItemEditorEmpty_Message": "Let's say hello to {{itemName}}!",
-    "HelloWorldItemEditorEmpty_Button": "Save item"
+
+    "Classifier_Tab_Dashboard": "Dashboard",
+    "Classifier_Tab_Items": "Items",
+    "Classifier_Tab_Domains": "Domains",
+    "Classifier_Tab_Lakehouses": "Lakehouses",
+    "Classifier_Tab_Labels": "Labels",
+
+    "Classifier_Ribbon_ApplyLabel": "Apply Label",
+    "Classifier_Ribbon_RemoveLabel": "Remove Label",
+    "Classifier_Ribbon_Refresh": "Refresh",
+
+    "Classifier_Dashboard_TotalDomains": "Domains",
+    "Classifier_Dashboard_TotalItems": "Total Items",
+    "Classifier_Dashboard_Unlabeled": "Unlabeled",
+    "Classifier_Dashboard_Loading": "Loading summary…",
+
+    "Classifier_Items_FilterWorkspace": "Workspace",
+    "Classifier_Items_FilterType": "Item type",
+    "Classifier_Items_FilterLabel": "Label status",
+    "Classifier_Items_ColName": "Name",
+    "Classifier_Items_ColType": "Type",
+    "Classifier_Items_ColWorkspace": "Workspace",
+    "Classifier_Items_ColLabel": "Current Label",
+    "Classifier_Items_SelectAll": "Select all",
+    "Classifier_Items_Loading": "Loading items…",
+    "Classifier_Items_Empty": "No items match the current filters.",
+
+    "Classifier_Domains_ColName": "Name",
+    "Classifier_Domains_ColDescription": "Description",
+    "Classifier_Domains_ColParent": "Parent",
+    "Classifier_Domains_ColDefaultLabel": "Default Label",
+    "Classifier_Domains_Loading": "Loading domains…",
+    "Classifier_Domains_Empty": "No domains found.",
+
+    "Classifier_Lakehouses_SelectWorkspace": "Select a workspace",
+    "Classifier_Lakehouses_SelectLakehouse": "Select a lakehouse",
+    "Classifier_Lakehouses_ColTable": "Table",
+    "Classifier_Lakehouses_ColType": "Type",
+    "Classifier_Lakehouses_ColFormat": "Format",
+    "Classifier_Lakehouses_Loading": "Loading tables…",
+    "Classifier_Lakehouses_Empty": "Select a lakehouse to view its tables.",
+
+    "Classifier_Labels_ColName": "Label",
+    "Classifier_Labels_ColLevel": "Sensitivity",
+    "Classifier_Labels_ColDescription": "Description",
+    "Classifier_Labels_Loading": "Loading labels…",
+    "Classifier_Labels_Empty": "No sensitivity labels found in this tenant.",
+
+    "Classifier_BulkBar_Selected": "{{count}} selected",
+    "Classifier_BulkBar_Apply": "Apply Label",
+    "Classifier_BulkBar_Remove": "Remove Label",
+    "Classifier_BulkBar_Clear": "Clear selection",
+
+    "Classifier_Confirm_Title": "Confirm action",
+    "Classifier_Confirm_ApplyLabel": "Apply '{{label}}' to {{count}} item(s)?",
+    "Classifier_Confirm_RemoveLabel": "Remove label from {{count}} item(s)?",
+    "Classifier_Confirm_Apply": "Apply",
+    "Classifier_Confirm_Cancel": "Cancel",
+
+    "Classifier_Progress_Title": "Applying labels",
+    "Classifier_Progress_Success": "{{count}} item(s) labeled successfully.",
+    "Classifier_Progress_Failure": "{{count}} item(s) failed.",
+    "Classifier_Progress_Done": "Done"
 }
   
