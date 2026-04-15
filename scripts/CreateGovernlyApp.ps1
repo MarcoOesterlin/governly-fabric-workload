@@ -3,63 +3,97 @@
     Creates the Entra ID (Azure AD) app registration for the Governly Fabric Workload.
 
 .DESCRIPTION
-    Based on the official Microsoft Fabric WDK pattern (CreateDevAADApp.ps1).
+    Uses native PowerShell + device code flow — no Azure CLI required.
     Automates all app registration setup: scopes, permissions, pre-authorized clients,
     client secret, redirect URI, and optional claims.
 
     Prerequisites:
-      - Azure CLI installed and on your PATH (https://aka.ms/installazurecli)
+      - PowerShell 7+ (pwsh) — already installed on this machine
       - You must have at least a Cloud Application Administrator role in the target tenant
-
-.PARAMETER tenantId
-    The Entra ID tenant ID where the Fabric workspace lives.
-    If not provided, the script will prompt for it.
+      - A browser to complete the sign-in
 
 .EXAMPLE
-    .\CreateGovernlyApp.ps1 -tenantId "bbbbcccc-1111-dddd-2222-eeee3333ffff"
+    pwsh .\scripts\CreateGovernlyApp.ps1
 #>
 
 param (
     [string]$tenantId
 )
 
+$ErrorActionPreference = "Stop"
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-function PostAADRequest {
-    param (
-        [string]$url,
-        [string]$body
-    )
-    # Write body to temp file to avoid shell quoting issues across platforms
-    $tempFile = [System.IO.Path]::GetTempFileName()
-    $body | Out-File -FilePath $tempFile -Encoding utf8
-    $result = az rest --method POST --url $url --headers "Content-Type=application/json" --body "@$tempFile"
-    Remove-Item $tempFile
-    return $result
+function GraphPost {
+    param ([string]$url, [hashtable]$body, [string]$token)
+    return Invoke-RestMethod -Method POST -Uri $url `
+        -Headers @{ Authorization = "Bearer $token"; "Content-Type" = "application/json" } `
+        -Body ($body | ConvertTo-Json -Compress -Depth 10)
 }
 
 function PrintInfo {
-    param (
-        [string]$key,
-        [string]$value
-    )
+    param ([string]$key, [string]$value)
     $bold  = [char]27 + "[1m"
     $reset = [char]27 + "[0m"
     Write-Host ("${bold}$key : ${reset}" + $value)
 }
 
-# ── Sign in ──────────────────────────────────────────────────────────────────
+# ── Device code sign-in (no Azure CLI needed) ─────────────────────────────
 
 Write-Host ""
 Write-Host "=========================================="
 Write-Host "  Governly — Fabric Workload App Setup"
 Write-Host "=========================================="
 Write-Host ""
+Write-Host "Authenticating via device code flow..."
+Write-Host ""
 
-$loginResult = az login --allow-no-subscriptions
-if (-not $loginResult) {
-    Write-Host "Azure CLI login failed. Please install Azure CLI and try again."
-    Exit 1
+$PUBLIC_CLIENT_ID = "04b07795-8ddb-461a-bbee-02f9e1bf7b46"  # Azure CLI public client (widely trusted)
+$scope = "https://graph.microsoft.com/Application.ReadWrite.All offline_access"
+
+$dcResponse = Invoke-RestMethod -Method POST `
+    -Uri "https://login.microsoftonline.com/common/oauth2/v2.0/devicecode" `
+    -Body @{ client_id = $PUBLIC_CLIENT_ID; scope = $scope }
+
+Write-Host $dcResponse.message
+Write-Host ""
+
+# Open browser automatically if possible
+try { Start-Process "https://microsoft.com/devicelogin" } catch {}
+
+# Poll for token
+$accessToken = $null
+$pollBody = @{
+    client_id   = $PUBLIC_CLIENT_ID
+    grant_type  = "urn:ietf:params:oauth:grant-type:device_code"
+    device_code = $dcResponse.device_code
+}
+
+Write-Host "Waiting for sign-in..." -NoNewline
+while ($null -eq $accessToken) {
+    Start-Sleep -Seconds 5
+    try {
+        $tokenResponse = Invoke-RestMethod -Method POST `
+            -Uri "https://login.microsoftonline.com/common/oauth2/v2.0/token" `
+            -Body $pollBody
+        $accessToken = $tokenResponse.access_token
+        # Extract tenant from token claims
+        $claims = [System.Text.Json.JsonDocument]::Parse(
+            [System.Text.Encoding]::UTF8.GetString(
+                [System.Convert]::FromBase64String(
+                    ($accessToken.Split('.')[1].PadRight(($accessToken.Split('.')[1].Length + 3) -band -4, '='))
+                )
+            )
+        ).RootElement
+        if (-not $tenantId) {
+            $tenantId = $claims.GetProperty("tid").GetString()
+        }
+        Write-Host " ✅"
+    } catch {
+        $errBody = $_.ErrorDetails.Message | ConvertFrom-Json -ErrorAction SilentlyContinue
+        if ($errBody.error -ne "authorization_pending") { throw }
+        Write-Host "." -NoNewline
+    }
 }
 
 # ── Collect parameters ───────────────────────────────────────────────────────
@@ -204,9 +238,7 @@ $application = @{
 Write-Host ""
 Write-Host "Creating app registration '$applicationName'..."
 
-$applicationJson = ($application | ConvertTo-Json -Compress -Depth 10)
-$result = PostAADRequest -url "https://graph.microsoft.com/v1.0/applications" -body $applicationJson
-$resultObject = $result | ConvertFrom-Json
+$resultObject = GraphPost -url "https://graph.microsoft.com/v1.0/applications" -body $application -token $accessToken
 
 $applicationObjectId = $resultObject.id
 if ($null -eq $applicationObjectId) {
@@ -231,10 +263,11 @@ $passwordCreds = @{
         endDateTime   = $endUtc.ToString('u') -replace ' ', 'T'
     }
 }
-$passwordCredsJson = ($passwordCreds | ConvertTo-Json -Compress -Depth 10)
 
-$addPasswordResult = PostAADRequest -url ("https://graph.microsoft.com/v1.0/applications/" + $applicationObjectId + "/addPassword") -body $passwordCredsJson
-$addPasswordObject = ($addPasswordResult | ConvertFrom-Json)
+$addPasswordObject = GraphPost `
+    -url "https://graph.microsoft.com/v1.0/applications/$applicationObjectId/addPassword" `
+    -body $passwordCreds `
+    -token $accessToken
 $secret = $addPasswordObject.secretText
 
 if ($null -eq $secret) {
