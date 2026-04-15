@@ -109,7 +109,8 @@ if (-not $tenantId) {
     $tenantId = $claims.tid
 }
 
-Write-Host "Signed in as $($tokenResponse.id_token ? ((([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($tokenResponse.id_token.Split('.')[1] + '===').Substring(0, [math]::Floor(($tokenResponse.id_token.Split('.')[1].Length+3)/4)*4))) | ConvertFrom-Json).preferred_username) : 'user') (tenant: $tenantId)"
+$me = Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/me" -Headers @{ Authorization = "Bearer $accessToken" }
+Write-Host "Signed in as $($me.userPrincipalName) (tenant: $tenantId)"
 
 function GraphPost {
     param([string]$url, [hashtable]$body)
