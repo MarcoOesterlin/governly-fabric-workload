@@ -38,7 +38,7 @@ Write-Host ""
 # Uses the well-known Azure CLI public client which has http://localhost registered
 $clientId    = "04b07795-8ddb-461a-bbee-02f9e1bf7b46"
 $port        = 62001
-$redirectUri = "http://localhost:$port/callback"
+$redirectUri = "http://localhost:$port"
 $scope       = "https://graph.microsoft.com/Application.ReadWrite.All openid profile"
 
 # PKCE
