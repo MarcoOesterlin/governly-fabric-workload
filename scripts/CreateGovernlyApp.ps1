@@ -46,6 +46,7 @@ Import-Module Microsoft.Graph.Applications    -MinimumVersion 2.0.0 -Force
 # ── Sign in ──────────────────────────────────────────────────────────────────
 
 Write-Host "Opening browser for sign-in (use your Fabric admin account)..."
+$env:MSAL_ENABLE_WAM = "0"  # Force visible browser window instead of hidden WAM popup
 Connect-MgGraph -Scopes "Application.ReadWrite.All" -NoWelcome
 
 $context  = Get-MgContext
