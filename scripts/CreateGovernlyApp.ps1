@@ -66,22 +66,15 @@ Start-Process $authUrl
 
 Write-Host "Waiting for sign-in to complete (browser will redirect back)..."
 $context = $listener.GetContext()
-$listener.Stop()
 
-# Parse auth code from query string
-$query = $context.Request.Url.Query.TrimStart('?')
-$params = @{}
-$query.Split('&') | ForEach-Object {
-    $kv = $_.Split('=', 2)
-    if ($kv.Count -eq 2) { $params[$kv[0]] = [Uri]::UnescapeDataString($kv[1]) }
-}
-
-# Close browser tab
+# Close browser tab first, then stop listener
 $html = '<html><body><script>window.close()</script><p>Sign-in complete. You can close this window.</p></body></html>'
 $buf = [Text.Encoding]::UTF8.GetBytes($html)
 $context.Response.ContentLength64 = $buf.Length
 $context.Response.OutputStream.Write($buf, 0, $buf.Length)
 $context.Response.OutputStream.Close()
+
+$listener.Stop()
 
 if ($params['error']) { throw "Auth error: $($params['error']) — $($params['error_description'])" }
 if ($params['state'] -ne $state) { throw "State mismatch — possible CSRF" }
