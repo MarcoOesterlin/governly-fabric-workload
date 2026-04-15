@@ -76,6 +76,14 @@ $context.Response.OutputStream.Close()
 
 $listener.Stop()
 
+# Parse auth code from query string
+$query = $context.Request.Url.Query.TrimStart('?')
+$params = @{}
+$query.Split('&') | ForEach-Object {
+    $kv = $_.Split('=', 2)
+    if ($kv.Count -eq 2) { $params[$kv[0]] = [Uri]::UnescapeDataString($kv[1]) }
+}
+
 if ($params['error']) { throw "Auth error: $($params['error']) — $($params['error_description'])" }
 if ($params['state'] -ne $state) { throw "State mismatch — possible CSRF" }
 
