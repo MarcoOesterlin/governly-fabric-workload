@@ -9,6 +9,7 @@
     "start:codespace": "cross-env NODE_OPTIONS=--max-old-space-size=8192 env-cmd -f .env.dev webpack serve --open --config ./devServer/webpack.dev.js --no-hot",
     "build:test": "env-cmd -f .env.test webpack --config ./webpack.config.js --output-path ../build/Frontend --progress",
     "build:ghpages": "env-cmd -f .env.ghpages webpack --config ./webpack.config.js --mode production --progress",
+    "build:manifest": "pwsh ./scripts/packaging/BuildManifestPackage.ps1",
     "deploy": "npm run build:ghpages && node -e \"require('fs').writeFileSync('dist/.nojekyll','')\" && gh-pages -d dist"
   },
   "author": "",

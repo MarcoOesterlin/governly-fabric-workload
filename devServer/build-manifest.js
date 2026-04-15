@@ -7,7 +7,7 @@ const path = require("path");
 const execAsync = util.promisify(exec);
 
 // Update path to point to scripts from project root
-const buildManifestPackageScript = path.resolve(__dirname, "../../scripts/Build/BuildManifestPackage.ps1");
+const buildManifestPackageScript = path.resolve(__dirname, "../scripts/packaging/BuildManifestPackage.ps1");
 
 /**
  * Builds the manifest package using the PowerShell script
