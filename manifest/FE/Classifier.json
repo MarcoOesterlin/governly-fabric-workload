@@ -1,0 +1,21 @@
+{
+    "name": "Classifier",
+    "displayName": "Governly Instance",
+    "displayNamePlural": "Governly Instances",
+    "version": "1.100",
+    "editor": {
+        "path": "/index.html"
+    },
+    "icon": {
+        "name": "assets/icon.png"
+    },
+    "activeIcon": {
+        "name": "assets/icon.png"
+    },
+    "contextMenuItems": [],
+    "quickActionItems": [],
+    "createItemDialogConfig": {
+        "onCreationFailure": { "action": "item.onCreationFailure" },
+        "onCreationSuccess": { "action": "item.onCreationSuccess" }
+    }
+}
