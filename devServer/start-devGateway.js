@@ -6,7 +6,7 @@ const path = require("path");
 const execAsync = util.promisify(exec);
 
 // Update path to point to scripts from project root
-const startDevGatewayScript = path.resolve(__dirname, "../../scripts/Run/StartDevGateway.ps1");
+const startDevGatewayScript = path.resolve(__dirname, "../scripts/Run/StartDevGateway.ps1");
 
 /**
  * Starts the Dev Gateway using the PowerShell script

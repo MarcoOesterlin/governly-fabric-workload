@@ -16,11 +16,17 @@ export async function initialize(params: InitParams) {
     console.log('✅ WorkloadClient created successfully');
 
     const history = createBrowserHistory();
-    console.log('✅ Browser history created successfully');
+    console.log('✅ Browser history created, initial path:', history.location.pathname);
     
+    // Listen for all history changes
+    history.listen((location, action) => {
+        console.log(`🔄 History changed [${action}]: ${location.pathname}`);
+    });
+
     workloadClient.navigation.onNavigate((route) => {
-        console.log('🧭 Navigation event:', route);
-        history.replace(route.targetUrl);
+        console.log('🧭 Navigation event, targetUrl:', route.targetUrl);
+        history.push(route.targetUrl);
+        console.log('🧭 History after push:', history.location.pathname);
     });
     workloadClient.action.onAction(async function ({ action, data }) {
         const { id } = data as ItemTabActionContext;

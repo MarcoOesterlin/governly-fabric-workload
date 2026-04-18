@@ -30,27 +30,39 @@ export interface SharedState {
 }
 
 export function App({ history, workloadClient }: AppProps) {
-    console.log('🎯 App component rendering with history:', history);
-    console.log('🎯 Current location:', history.location);
+    console.log('🎯 App component rendering, location:', history.location.pathname);
 
     return <Router history={history}>
-        {/* Test route for debugging */}
-        <Route exact path="/">
-            <div style={{ padding: '20px', backgroundColor: '#f0f0f0' }}>
-                <h1>🎉 Workload is running!</h1>
-                <p>Current URL: {window.location.href}</p>
-                <p>Workload Name: {process.env.WORKLOAD_NAME}</p>
-            </div>
-        </Route>    
         <Switch>
-            {/* Routings for the Classifier Item Editor */}
+            {/* Editor route — Fabric navigates to {editor.path}/{itemObjectId} */}
+            <Route path="/index.html/:itemObjectId">
+                <ClassifierItemEditor workloadClient={workloadClient} />
+            </Route>
+
+            {/* Also match worker-initiated navigation */}
             <Route path="/ClassifierItem-editor/:itemObjectId">
-                <ClassifierItemEditor
-                    workloadClient={workloadClient} />
+                <ClassifierItemEditor workloadClient={workloadClient} />
             </Route>
 
             {/* Conditionally loaded playground routes (only in development) */}
             <ConditionalPlaygroundRoutes workloadClient={workloadClient} />
+
+            {/* Catch-all: shows current path for debugging unmatched routes */}
+            <Route>
+                <DebugRoute />
+            </Route>
         </Switch>
     </Router>;
+}
+
+function DebugRoute() {
+    return (
+        <div style={{ padding: 20, fontFamily: 'monospace', fontSize: 14 }}>
+            <h2>⚠️ No route matched</h2>
+            <p><strong>href:</strong> {window.location.href}</p>
+            <p><strong>pathname:</strong> {window.location.pathname}</p>
+            <p><strong>hash:</strong> {window.location.hash}</p>
+            <p>Expected: <code>/ClassifierItem-editor/:itemObjectId</code></p>
+        </div>
+    );
 }

@@ -1,16 +1,21 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<WorkloadManifestConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" SchemaVersion="1.101.0">
-  <Workload WorkloadName="{{WORKLOAD_NAME}}" HostingType="FERemote">
+<WorkloadManifestConfiguration xmlns:xsi= "http://www.w3.org/2001/XMLSchema-instance" SchemaVersion="1.101.0">
+  <Workload WorkloadName="{{WORKLOAD_NAME}}" HostingType="Remote">
     <Version>{{WORKLOAD_VERSION}}</Version>
     <RemoteServiceConfiguration>
       <CloudServiceConfiguration>
         <Cloud>Public</Cloud>
         <AADApp>
           <AppId>{{FRONTEND_APPID}}</AppId>
-          <RedirectUri>http://localhost:60006/close</RedirectUri>
+          <RedirectUri>{{FRONTEND_URL}}</RedirectUri>
           <ResourceId>{{AUDIENCE}}</ResourceId>
         </AADApp>
         <Endpoints>
+          <ServiceEndpoint>
+            <Name>Workload</Name>
+            <Url>{{FRONTEND_URL}}</Url>
+            <IsEndpointResolutionService>false</IsEndpointResolutionService>
+          </ServiceEndpoint>
           <ServiceEndpoint>
             <Name>Frontend</Name>
             <Url>{{FRONTEND_URL}}</Url>

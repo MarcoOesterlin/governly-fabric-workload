@@ -4,6 +4,7 @@
  */
 
 const manifestApi = require('./manifestApi');
+const workloadApi = require('./workloadApi');
 
 /**
  * Register dev server manifest APIs with an Express application
@@ -12,6 +13,9 @@ const manifestApi = require('./manifestApi');
 function registerDevServerApis(app) {
   console.log('*** Mounting Manifest API ***');
   app.use('/', manifestApi);
+
+  console.log('*** Mounting Workload Backend API Stub ***');
+  app.use('/workload', workloadApi);
 }
 
 function registerDevServerComponents() {

@@ -9,7 +9,8 @@ const { registerDevServerApis, registerDevServerComponents } = require('.'); // 
 // TODO: once we use the manifest for publishing we can remove this.
 process.env.DEV_AAD_CONFIG_FE_APPID = process.env.FRONTEND_APPID;
 process.env.DEV_AAD_CONFIG_BE_APPID = process.env.BACKEND_APPID;
-process.env.DEV_AAD_CONFIG_BE_AUDIENCE= ""
+process.env.DEV_AAD_CONFIG_BE_AUDIENCE = process.env.AUDIENCE;
+process.env.DEV_AAD_CONFIG_REDIRECT_URI = process.env.DEV_AAD_CONFIG_REDIRECT_URI || process.env.FRONTEND_URL;
 
 
 console.log('********************   Development Configuration   *******************');
@@ -42,7 +43,8 @@ module.exports = merge(baseConfig, {
         headers: {
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "GET,OPTIONS",
-            "Access-Control-Allow-Headers": "*"
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Private-Network": "true"
         },
         setupMiddlewares: function (middlewares, devServer) {
             console.log('*********************************************************************');
@@ -79,11 +81,13 @@ module.exports = merge(baseConfig, {
             // Add JSON body parsing middleware for our APIs
             devServer.app.use(express.json());
             
-            // Add global CORS middleware
+            // Add global CORS middleware + request logger
             devServer.app.use((req, res, next) => {
+                console.log(`[HTTP] ${req.method} ${req.url} (from: ${req.headers.origin || req.headers.referer || 'direct'})`);
                 res.header('Access-Control-Allow-Origin', '*');
                 res.header('Access-Control-Allow-Methods', 'GET, PUT, POST, DELETE, OPTIONS');
                 res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Content-Length, X-Requested-With');
+                res.header('Access-Control-Allow-Private-Network', 'true');
                 
                 // Handle preflight requests
                 if (req.method === 'OPTIONS') {

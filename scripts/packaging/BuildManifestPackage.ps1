@@ -4,14 +4,15 @@
 
 .DESCRIPTION
   Reads environment variables (or .env.ghpages), substitutes placeholders in manifest
-  templates, and packs them into a .nupkg using nuget-bin.
+  templates, and creates the .nupkg as a ZIP directly (no nuget.exe required).
+  Package structure follows the official Microsoft WDK sample exactly.
 
 .EXAMPLE
   # Load .env.ghpages then build:
   Get-Content .\.env.ghpages | ForEach-Object {
-    if ($_ -match '^([^#][^=]*)=(.*)$') { $env:($Matches[1]) = $Matches[2] }
+    if ($_ -match '^([^#][^=]*)=(.*)$') { [System.Environment]::SetEnvironmentVariable($Matches[1].Trim(), $Matches[2].Trim()) }
   }
-  .\scripts\Build\BuildManifestPackage.ps1
+  .\scripts\packaging\BuildManifestPackage.ps1
 #>
 
 param(
@@ -24,65 +25,117 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-if (-not $FrontendAppId) { throw "FRONTEND_APPID is required. Run .\scripts\CreateGovernlyApp.ps1 first." }
-if (-not $FrontendUrl)   { throw "FRONTEND_URL is required (e.g. https://MarcoOesterlin.github.io/governly-fabric-workload)." }
-if (-not $Audience)      { throw "AUDIENCE is required (Application ID URI from app registration)." }
+if (-not $FrontendAppId) { throw "FRONTEND_APPID is required." }
+if (-not $FrontendUrl)   { throw "FRONTEND_URL is required." }
+if (-not $Audience)      { throw "AUDIENCE is required." }
 
 $projectRoot = Resolve-Path "$PSScriptRoot\..\.."
 $manifestDir = Join-Path $projectRoot "manifest"
 $outputDir   = Join-Path $projectRoot "build\Manifest"
-$tempDir     = Join-Path ([System.IO.Path]::GetTempPath()) "GovernlyManifest_$(Get-Random)"
 
 New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
-New-Item -ItemType Directory -Force -Path $tempDir   | Out-Null
+
+Add-Type -Assembly System.IO.Compression
+Add-Type -Assembly System.IO.Compression.FileSystem
+
+$nupkgPath = Join-Path $outputDir "Org.Governly.$WorkloadVersion.nupkg"
+if (Test-Path $nupkgPath) { Remove-Item $nupkgPath -Force }
+
+function Expand-Template([string]$path) {
+  $content = Get-Content $path -Raw -Encoding UTF8
+  $content `
+    -replace "\{\{WORKLOAD_NAME\}\}",    $WorkloadName    `
+    -replace "\{\{WORKLOAD_VERSION\}\}", $WorkloadVersion `
+    -replace "\{\{FRONTEND_APPID\}\}",   $FrontendAppId   `
+    -replace "\{\{FRONTEND_URL\}\}",     $FrontendUrl     `
+    -replace "\{\{AUDIENCE\}\}",         $Audience
+}
+
+function Add-TextEntry([System.IO.Compression.ZipArchive]$zip, [string]$entryPath, [string]$content) {
+  $entry  = $zip.CreateEntry($entryPath, [System.IO.Compression.CompressionLevel]::Optimal)
+  $stream = $entry.Open()
+  $bytes  = [System.Text.Encoding]::UTF8.GetBytes($content)
+  $stream.Write($bytes, 0, $bytes.Length)
+  $stream.Dispose()
+}
+
+function Add-BinaryEntry([System.IO.Compression.ZipArchive]$zip, [string]$entryPath, [string]$filePath) {
+  $entry  = $zip.CreateEntry($entryPath, [System.IO.Compression.CompressionLevel]::Optimal)
+  $stream = $entry.Open()
+  $bytes  = [System.IO.File]::ReadAllBytes($filePath)
+  $stream.Write($bytes, 0, $bytes.Length)
+  $stream.Dispose()
+}
+
+$fs  = [System.IO.File]::Open($nupkgPath, [System.IO.FileMode]::Create)
+$zip = New-Object System.IO.Compression.ZipArchive($fs, [System.IO.Compression.ZipArchiveMode]::Create)
 
 try {
-  # Populate template placeholders
-  foreach ($file in @("WorkloadManifest.xml", "Classifier.xml")) {
-    $content = Get-Content (Join-Path $manifestDir $file) -Raw
-    $content = $content `
-      -replace "\{\{WORKLOAD_NAME\}\}",    $WorkloadName    `
-      -replace "\{\{WORKLOAD_VERSION\}\}", $WorkloadVersion `
-      -replace "\{\{FRONTEND_APPID\}\}",   $FrontendAppId   `
-      -replace "\{\{FRONTEND_URL\}\}",     $FrontendUrl     `
-      -replace "\{\{AUDIENCE\}\}",         $Audience
-    $content | Out-File (Join-Path $tempDir $file) -Encoding utf8NoBOM
-  }
+  # --- [Content_Types].xml ---
+  $contentTypes = @'
+<?xml version="1.0" encoding="utf-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels"   ContentType="application/vnd.openxmlformats-package.relationships+xml" />
+  <Default Extension="psmdcp" ContentType="application/vnd.openxmlformats-package.core-properties+xml" />
+  <Default Extension="nuspec" ContentType="application/octet" />
+  <Default Extension="xml"    ContentType="application/octet" />
+  <Default Extension="json"   ContentType="application/octet" />
+  <Default Extension="png"    ContentType="application/octet" />
+</Types>
+'@
+  Add-TextEntry $zip "[Content_Types].xml" $contentTypes
 
-  # Write .nuspec
+  # --- _rels/.rels ---
+  $rels = @'
+<?xml version="1.0" encoding="utf-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Type="http://schemas.microsoft.com/packaging/2010/07/manifest" Target="/ManifestPackageRelease.nuspec" Id="R1" />
+</Relationships>
+'@
+  Add-TextEntry $zip "_rels/.rels" $rels
+
+  # --- ManifestPackageRelease.nuspec (id matches official WDK sample) ---
   $nuspec = @"
-<?xml version="1.0"?>
+<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://schemas.microsoft.com/packaging/2010/07/nuspec.xsd">
   <metadata>
-    <id>$WorkloadName</id>
+    <id>ManifestPackageRelease</id>
     <version>$WorkloadVersion</version>
     <authors>Governly</authors>
+    <owners>Governly</owners>
     <description>Governly Fabric Workload manifest package</description>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
   </metadata>
-  <files>
-    <file src="WorkloadManifest.xml" target="BE\WorkloadManifest.xml" />
-    <file src="Classifier.xml" target="BE\Classifier.xml" />
-  </files>
 </package>
 "@
-  $nuspec | Out-File (Join-Path $tempDir "$WorkloadName.nuspec") -Encoding utf8NoBOM
+  Add-TextEntry $zip "ManifestPackageRelease.nuspec" $nuspec
 
-  # Pack with nuget (via npx nuget-bin from project root)
-  Push-Location $tempDir
-  & npx --prefix $projectRoot nuget pack "$WorkloadName.nuspec" -OutputDirectory $tempDir
-  Pop-Location
+  # --- BE/ manifest files ---
+  Add-TextEntry $zip "BE/WorkloadManifest.xml" (Expand-Template (Join-Path $manifestDir "WorkloadManifest.xml"))
+  Add-TextEntry $zip "BE/Classifier.xml"       (Expand-Template (Join-Path $manifestDir "Classifier.xml"))
 
-  $src  = Join-Path $tempDir "$WorkloadName.$WorkloadVersion.nupkg"
-  $dest = Join-Path $outputDir "$WorkloadName.$WorkloadVersion.nupkg"
-  Move-Item $src $dest -Force
+  # --- FE/ files (product.json lowercase, matching official WDK nuspec target) ---
+  Add-TextEntry $zip "FE/product.json" (Get-Content (Join-Path $manifestDir "FE\Product.json") -Raw -Encoding UTF8)
+  Add-TextEntry $zip "FE/Classifier.json" (Get-Content (Join-Path $manifestDir "FE\Classifier.json") -Raw -Encoding UTF8)
 
-  Write-Host ""
-  Write-Host "SUCCESS: Manifest package ready at:" -ForegroundColor Green
-  Write-Host "  $dest" -ForegroundColor Cyan
-  Write-Host ""
-  Write-Host "Next step: Upload $dest in Fabric Admin portal > Workloads." -ForegroundColor Yellow
+  # --- FE/assets/ ---
+  $feAssetsDir = Join-Path $manifestDir "FE\assets"
+  Get-ChildItem -Recurse -File $feAssetsDir | ForEach-Object {
+    $rel = $_.FullName.Substring($feAssetsDir.Length + 1).Replace('\', '/')
+    if ($_.Extension -eq ".png") {
+      Add-BinaryEntry $zip "FE/assets/$rel" $_.FullName
+    } else {
+      Add-TextEntry $zip "FE/assets/$rel" (Get-Content $_.FullName -Raw -Encoding UTF8)
+    }
+  }
+
+} finally {
+  $zip.Dispose()
+  $fs.Dispose()
 }
-finally {
-  if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force }
-}
+
+Write-Host ""
+Write-Host "SUCCESS: Manifest package ready at:" -ForegroundColor Green
+Write-Host "  $nupkgPath" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Next step: Upload $nupkgPath in Fabric Admin portal > Workloads." -ForegroundColor Yellow

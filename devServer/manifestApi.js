@@ -41,6 +41,7 @@ router.options('/manifests_new{*path}', (req, res) => {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Private-Network': 'true',
     'Access-Control-Max-Age': '86400' // 24 hours
   });
   res.sendStatus(204); // No content needed for OPTIONS response
@@ -62,16 +63,11 @@ router.get('/manifests_new/metadata', rateLimit, (req, res) => {
   const devParameters = {
     name: process.env.WORKLOAD_NAME,
     url: "http://127.0.0.1:60006",
-    devAADFEAppConfig: {
-      appId: process.env.DEV_AAD_CONFIG_FE_APPID,
-    },
     devAADAppConfig: {
-      appId: process.env.DEV_AAD_CONFIG_BE_APPID,
       audience: process.env.DEV_AAD_CONFIG_BE_AUDIENCE,
+      appId: process.env.DEV_AAD_CONFIG_BE_APPID,
       redirectUri: process.env.DEV_AAD_CONFIG_REDIRECT_URI
-    },
-    //If you enable Sandbox Relaxation, make sure to also enable it in the manifest package and vica versa.
-    devSandboxRelaxation: false
+    }
   };
  
   res.end(JSON.stringify({ extension: devParameters }));

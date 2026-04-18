@@ -20,6 +20,7 @@ import { LabelPicker } from '../components/LabelPicker';
 interface ItemsViewProps {
   apiClient: GovernlyApiClient;
   workspaceId?: string;
+  workspaceError?: string;
   labels: SensitivityLabel[];
 }
 
@@ -28,24 +29,29 @@ interface StatusMessage {
   text: string;
 }
 
-export const ItemsView: React.FC<ItemsViewProps> = ({ apiClient, workspaceId, labels }) => {
+export const ItemsView: React.FC<ItemsViewProps> = ({ apiClient, workspaceId, workspaceError, labels }) => {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<FabricItem[]>([]);
   const [statusMsg, setStatusMsg] = useState<StatusMessage | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     if (workspaceId) {
       setLoading(true);
+      setApiError(null);
       apiClient.listWorkspaceItems(workspaceId)
         .then((fetched) => {
           if (cancelled) return;
+          console.log('[Governly] listWorkspaceItems returned', fetched.length, 'items');
           setItems(fetched);
           setLoading(false);
         })
-        .catch(() => {
+        .catch((err: any) => {
           if (cancelled) return;
+          console.error('[Governly] listWorkspaceItems failed:', err);
+          setApiError(err?.message ?? String(err));
           setItems([]);
           setLoading(false);
         });
@@ -96,11 +102,35 @@ export const ItemsView: React.FC<ItemsViewProps> = ({ apiClient, workspaceId, la
     }),
   ], [t, labels, handleLabelChange]);
 
+  if (workspaceError) {
+    return (
+      <div style={{ padding: 32 }}>
+        <MessageBar intent="error">
+          <MessageBarBody>
+            <strong>Workspace Error:</strong> {workspaceError}
+          </MessageBarBody>
+        </MessageBar>
+      </div>
+    );
+  }
+
   if (!workspaceId || loading) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 32 }}>
         <Spinner size="medium" />
         <Text>{t('Classifier_Items_Loading', 'Loading items…')}</Text>
+      </div>
+    );
+  }
+
+  if (apiError) {
+    return (
+      <div style={{ padding: 32 }}>
+        <MessageBar intent="error">
+          <MessageBarBody>
+            <strong>Failed to load workspace items:</strong> {apiError}
+          </MessageBarBody>
+        </MessageBar>
       </div>
     );
   }

@@ -42,6 +42,7 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [labels, setLabels] = useState<SensitivityLabel[]>([]);
   const [workspaceId, setWorkspaceId] = useState<string | undefined>();
+  const [workspaceError, setWorkspaceError] = useState<string | undefined>();
 
   useEffect(() => {
     apiClient.listSensitivityLabels().then(setLabels).catch(() => {});
@@ -49,9 +50,22 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
 
   useEffect(() => {
     if (!itemObjectId) return;
-    callGetItem(workloadClient, itemObjectId).then(result => {
-      if (result?.item?.workspaceId) setWorkspaceId(result.item.workspaceId);
-    }).catch(() => {});
+    console.log('[Governly] Resolving workspaceId for item:', itemObjectId);
+    callGetItem(workloadClient, itemObjectId)
+      .then(result => {
+        console.log('[Governly] callGetItem result:', JSON.stringify(result));
+        if (result?.item?.workspaceId) {
+          console.log('[Governly] workspaceId resolved:', result.item.workspaceId);
+          setWorkspaceId(result.item.workspaceId);
+        } else {
+          console.warn('[Governly] workspaceId not found in item result:', result);
+          setWorkspaceError('Could not resolve workspace ID from item metadata.');
+        }
+      })
+      .catch((err: any) => {
+        console.error('[Governly] callGetItem failed:', err);
+        setWorkspaceError(`Failed to load workspace context: ${err?.message ?? String(err)}`);
+      });
   }, [workloadClient, itemObjectId]);
 
   const handleRefresh = useCallback(() => {
@@ -66,11 +80,12 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
           key={refreshTrigger}
           apiClient={apiClient}
           workspaceId={workspaceId}
+          workspaceError={workspaceError}
           labels={labels}
         />
       ),
     },
-  ], [apiClient, refreshTrigger, labels, workspaceId]);
+  ], [apiClient, refreshTrigger, labels, workspaceId, workspaceError]);
 
   return (
     <ItemEditor

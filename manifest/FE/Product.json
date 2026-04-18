@@ -1,0 +1,71 @@
+{
+    "name": "Governly",
+    "version": "1.100",
+    "displayName": "Governly",
+    "fullDisplayName": "Governly – Sensitivity Label Manager",
+    "description": "Bulk-apply Microsoft Purview sensitivity labels to Fabric items",
+    "favicon": "assets/icon.png",
+    "icon": {
+        "name": "assets/icon.png"
+    },
+    "homePage": {
+        "learningMaterials": [
+        {
+            "title": "Governly Documentation",
+            "introduction": "Get started with Governly",
+            "description": "Learn how to bulk-apply sensitivity labels to Microsoft Fabric items using Governly",
+            "image": "assets/icon.png",
+            "link": "https://github.com/MarcoOesterlin/governly-fabric-workload"
+        }
+    ],
+        "recommendedItemTypes": ["Classifier"]
+    },
+    "createExperience": {
+        "description": "Bulk-apply sensitivity labels to Fabric items",
+        "cards": [
+            {
+                "title": "Governly",
+                "description": "Bulk-apply Purview sensitivity labels to Fabric items and domains",
+                "icon": {
+                    "name": "assets/icon.png"
+                },
+                "icon_small": {
+                    "name": "assets/icon.png"
+                },
+                "createItemDialogConfig": {
+                    "onCreationFailure": { "action": "item.onCreationFailure" },
+                    "onCreationSuccess": { "action": "item.onCreationSuccess" }
+                },
+                "availableIn": [
+                    "home",
+                    "create-hub",
+                    "workspace-plus-new"
+                ],
+                "itemType": "Classifier"
+            }
+        ]
+    },
+    "productDetail": {
+        "publisher": "Governly",
+        "slogan": "Sensitivity Label Management for Microsoft Fabric",
+        "description": "Bulk-apply Microsoft Purview sensitivity labels to Fabric items, domains, and lakehouses",
+        "image": {
+            "mediaType": 0,
+            "source": "assets/icon.png"
+        },
+        "slideMedia": [
+            {
+                "mediaType": 0,
+                "source": "assets/icon.png"
+            }
+        ],
+        "supportLink": {
+            "documentation":  { "url": "https://github.com/MarcoOesterlin/governly-fabric-workload" },
+            "certification":  { "url": "https://github.com/MarcoOesterlin/governly-fabric-workload" },
+            "help":           { "url": "https://github.com/MarcoOesterlin/governly-fabric-workload" },
+            "privacy":        { "url": "https://github.com/MarcoOesterlin/governly-fabric-workload" },
+            "terms":          { "url": "https://github.com/MarcoOesterlin/governly-fabric-workload" },
+            "license":        { "url": "https://github.com/MarcoOesterlin/governly-fabric-workload" }
+        }
+    }
+}
