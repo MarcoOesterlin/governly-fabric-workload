@@ -1,6 +1,8 @@
 import {
     createWorkloadClient,
+    DialogType,
     InitParams,
+    ItemCreateContext,
     ItemLikeV2,
     ItemSettingContext,
     // [JOB_SUPPORT] Job scheduling - To enable, run: scripts/Setup/CreateJob.ps1
@@ -46,6 +48,22 @@ export async function initialize(params: InitParams) {
     workloadClient.action.onAction(async function ({ action, data }) {
         console.log(`🧭 Started action ${action} with data:`, data);
         switch (action) {
+            case 'open.createClassifier': {
+                const { workspaceObjectId } = data as ItemCreateContext;
+                return workloadClient.dialog.open({
+                    workloadName: sampleWorkloadName,
+                    dialogType: DialogType.IFrame,
+                    route: {
+                        path: `/ClassifierItem-create/${workspaceObjectId}`,
+                    },
+                    options: {
+                        width: 360,
+                        height: 340,
+                        hasCloseButton: true,
+                    },
+                });
+            }
+
             case 'item.onCreationSuccess':
                 const { item: createdItem } = data as ItemCreationSuccessData;
                 var path = "/item-editor";
@@ -131,7 +149,8 @@ export async function initialize(params: InitParams) {
             //     return getJobDetailsPane(jobDetailsData);
             // }
             default:
-                throw new Error('Unknown action received');
+                console.warn(`⚠️ Unhandled action: ${action}`, data);
+                return undefined;
         }
     });
 }
