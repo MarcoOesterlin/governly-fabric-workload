@@ -7,24 +7,18 @@ import {
   ShieldTask24Regular,
   AppsList24Regular,
   Tag24Regular,
-  BuildingMultiple24Regular,
-  Database24Regular,
-  DataPie24Regular,
 } from '@fluentui/react-icons';
 
 import { GovernlyApiClient, SensitivityLabel } from '../../clients/GovernlyApiClient';
 import { callGetItem } from '../../controller/ItemCRUDController';
 import { ItemsView } from './views/ItemsView';
 import { LabelsView } from './views/LabelsView';
-import { DomainsView } from './views/DomainsView';
-import { LakehousesView } from './views/LakehousesView';
-import { DashboardView } from './views/DashboardView';
 
 interface ClassifierItemEditorProps {
   workloadClient: WorkloadClientAPI;
 }
 
-type ViewKey = 'items' | 'labels' | 'domains' | 'lakehouses' | 'dashboard';
+type ViewKey = 'items' | 'labels';
 
 interface NavItem {
   key: ViewKey;
@@ -34,11 +28,8 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { key: 'items',      labelKey: 'Nav_Items',      defaultLabel: 'Items',      icon: <AppsList24Regular /> },
-  { key: 'labels',     labelKey: 'Nav_Labels',     defaultLabel: 'Labels',     icon: <Tag24Regular /> },
-  { key: 'domains',    labelKey: 'Nav_Domains',    defaultLabel: 'Domains',    icon: <BuildingMultiple24Regular /> },
-  { key: 'lakehouses', labelKey: 'Nav_Lakehouses', defaultLabel: 'Lakehouses', icon: <Database24Regular /> },
-  { key: 'dashboard',  labelKey: 'Nav_Dashboard',  defaultLabel: 'Dashboard',  icon: <DataPie24Regular /> },
+  { key: 'items',  labelKey: 'Nav_Items',  defaultLabel: 'Workspace Items', icon: <AppsList24Regular /> },
+  { key: 'labels', labelKey: 'Nav_Labels', defaultLabel: 'Labels',          icon: <Tag24Regular /> },
 ];
 
 const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadClient }) => {
@@ -133,12 +124,6 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
         );
       case 'labels':
         return <LabelsView apiClient={apiClient} />;
-      case 'domains':
-        return <DomainsView apiClient={apiClient} />;
-      case 'lakehouses':
-        return <LakehousesView apiClient={apiClient} />;
-      case 'dashboard':
-        return <DashboardView apiClient={apiClient} onNavigateTo={(v) => setActiveView(v as ViewKey)} />;
       default:
         return null;
     }
