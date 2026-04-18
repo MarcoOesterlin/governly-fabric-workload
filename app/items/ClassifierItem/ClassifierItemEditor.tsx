@@ -9,6 +9,7 @@ import { Ribbon } from '../../components/ItemEditor/Ribbon';
 import { RibbonAction } from '../../components/ItemEditor/RibbonToolbar';
 
 import { GovernlyApiClient, SensitivityLabel } from '../../clients/GovernlyApiClient';
+import { callGetItem } from '../../controller/ItemCRUDController';
 import { ItemsView } from './views/ItemsView';
 
 interface ClassifierItemEditorProps {
@@ -35,16 +36,23 @@ const ClassifierRibbon: React.FC<ClassifierRibbonProps> = ({ viewContext, onRefr
 
 const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadClient }) => {
   const { itemObjectId } = useParams<{ itemObjectId: string }>();
-  void itemObjectId;
 
   const apiClient = useMemo(() => new GovernlyApiClient(workloadClient), [workloadClient]);
 
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [labels, setLabels] = useState<SensitivityLabel[]>([]);
+  const [workspaceId, setWorkspaceId] = useState<string | undefined>();
 
   useEffect(() => {
     apiClient.listSensitivityLabels().then(setLabels).catch(() => {});
   }, [apiClient]);
+
+  useEffect(() => {
+    if (!itemObjectId) return;
+    callGetItem(workloadClient, itemObjectId).then(result => {
+      if (result?.item?.workspaceId) setWorkspaceId(result.item.workspaceId);
+    }).catch(() => {});
+  }, [workloadClient, itemObjectId]);
 
   const handleRefresh = useCallback(() => {
     setRefreshTrigger(prev => prev + 1);
@@ -57,11 +65,12 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
         <ItemsView
           key={refreshTrigger}
           apiClient={apiClient}
+          workspaceId={workspaceId}
           labels={labels}
         />
       ),
     },
-  ], [apiClient, refreshTrigger, labels]);
+  ], [apiClient, refreshTrigger, labels, workspaceId]);
 
   return (
     <ItemEditor

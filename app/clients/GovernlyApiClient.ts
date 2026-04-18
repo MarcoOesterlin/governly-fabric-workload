@@ -102,6 +102,37 @@ export class GovernlyApiClient {
     return this.request<T>(GRAPH_API, GRAPH_SCOPE, path, options);
   }
 
+  async listWorkspaceItems(workspaceId: string): Promise<FabricItem[]> {
+    const all: FabricItem[] = [];
+    let continuationUri: string | undefined =
+      `${FABRIC_API}/workspaces/${workspaceId}/items`;
+
+    while (continuationUri) {
+      const { token } = await this.authService.acquireAccessToken(FABRIC_SCOPE);
+      const response = await fetch(continuationUri, {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Fabric API ${response.status}: ${text}`);
+      }
+      const data: { value: any[]; continuationUri?: string } = await response.json();
+      for (const i of data.value ?? []) {
+        all.push({
+          id: i.id,
+          type: i.type,
+          displayName: i.displayName,
+          workspaceId: i.workspaceId ?? workspaceId,
+        });
+      }
+      continuationUri = data.continuationUri;
+    }
+    return all;
+  }
+
   async listItems(params?: {
     workspaceId?: string;
     type?: string;

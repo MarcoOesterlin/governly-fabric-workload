@@ -14,11 +14,12 @@ import {
   MessageBarBody,
 } from '@fluentui/react-components';
 import { useTranslation } from 'react-i18next';
-import { FabricItem, FabricItemsPage, GovernlyApiClient, SensitivityLabel } from '../../../clients/GovernlyApiClient';
+import { FabricItem, GovernlyApiClient, SensitivityLabel } from '../../../clients/GovernlyApiClient';
 import { LabelPicker } from '../components/LabelPicker';
 
 interface ItemsViewProps {
   apiClient: GovernlyApiClient;
+  workspaceId?: string;
   labels: SensitivityLabel[];
 }
 
@@ -27,7 +28,7 @@ interface StatusMessage {
   text: string;
 }
 
-export const ItemsView: React.FC<ItemsViewProps> = ({ apiClient, labels }) => {
+export const ItemsView: React.FC<ItemsViewProps> = ({ apiClient, workspaceId, labels }) => {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<FabricItem[]>([]);
@@ -35,14 +36,22 @@ export const ItemsView: React.FC<ItemsViewProps> = ({ apiClient, labels }) => {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    apiClient.listItems().catch((): FabricItemsPage => ({ items: [] })).then((page) => {
-      if (cancelled) return;
-      setItems(page.items || []);
-      setLoading(false);
-    });
+    if (workspaceId) {
+      setLoading(true);
+      apiClient.listWorkspaceItems(workspaceId)
+        .then((fetched) => {
+          if (cancelled) return;
+          setItems(fetched);
+          setLoading(false);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setItems([]);
+          setLoading(false);
+        });
+    }
     return () => { cancelled = true; };
-  }, [apiClient]);
+  }, [apiClient, workspaceId]);
 
   const handleLabelChange = useCallback(async (item: FabricItem, labelId: string) => {
     try {
@@ -74,11 +83,6 @@ export const ItemsView: React.FC<ItemsViewProps> = ({ apiClient, labels }) => {
       renderCell: (item) => item.type,
     }),
     createTableColumn<FabricItem>({
-      columnId: 'workspace',
-      renderHeaderCell: () => t('Classifier_Items_ColWorkspace', 'Workspace'),
-      renderCell: (item) => item.workspaceName || item.workspaceId,
-    }),
-    createTableColumn<FabricItem>({
       columnId: 'label',
       renderHeaderCell: () => t('Classifier_Items_ColLabel', 'Sensitivity Label'),
       renderCell: (item) => (
@@ -92,7 +96,7 @@ export const ItemsView: React.FC<ItemsViewProps> = ({ apiClient, labels }) => {
     }),
   ], [t, labels, handleLabelChange]);
 
-  if (loading) {
+  if (!workspaceId || loading) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 32 }}>
         <Spinner size="medium" />
