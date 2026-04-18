@@ -9,7 +9,7 @@ import {
   Tag24Regular,
 } from '@fluentui/react-icons';
 
-import { GovernlyApiClient, SensitivityLabel } from '../../clients/GovernlyApiClient';
+import { GovernlyApiClient, FabricItem, SensitivityLabel } from '../../clients/GovernlyApiClient';
 import { callGetItem } from '../../controller/ItemCRUDController';
 import { ItemsView } from './views/ItemsView';
 import { LabelsView } from './views/LabelsView';
@@ -46,6 +46,9 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
   const [labelsError, setLabelsError] = useState<string | undefined>();
   const [workspaceId, setWorkspaceId] = useState<string | undefined>();
   const [workspaceError, setWorkspaceError] = useState<string | undefined>();
+  const [items, setItems] = useState<FabricItem[]>([]);
+  const [itemsLoading, setItemsLoading] = useState(false);
+  const [itemsError, setItemsError] = useState<string | undefined>();
 
   useEffect(() => {
     apiClient.listSensitivityLabels()
@@ -58,7 +61,41 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
         console.error('[Governly] listSensitivityLabels failed:', err);
         setLabelsError(err?.message ?? String(err));
       });
-  }, [apiClient]);
+  }, [apiClient, refreshTrigger]);
+
+  useEffect(() => {
+    if (!workspaceId) return undefined;
+    let cancelled = false;
+    setItemsLoading(true);
+    setItemsError(undefined);
+
+    const fetchAll = async () => {
+      const all: FabricItem[] = [];
+      let token: string | undefined;
+      do {
+        const page = await apiClient.listItems({ workspaceId, continuationToken: token });
+        all.push(...page.items);
+        token = page.continuationToken;
+      } while (token);
+      return all;
+    };
+
+    fetchAll()
+      .then(fetched => {
+        if (cancelled) return;
+        console.log('[Governly] listItems returned', fetched.length, 'items');
+        setItems(fetched);
+        setItemsLoading(false);
+      })
+      .catch((err: any) => {
+        if (cancelled) return;
+        console.error('[Governly] listItems failed:', err);
+        setItemsError(err?.message ?? (typeof err === 'object' ? JSON.stringify(err) : String(err)));
+        setItemsLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [apiClient, workspaceId, refreshTrigger]);
 
   useEffect(() => {
     if (!itemObjectId) return;
@@ -114,12 +151,15 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
       case 'items':
         return (
           <ItemsView
-            key={refreshTrigger}
             apiClient={apiClient}
             workspaceId={workspaceId}
             workspaceError={workspaceError}
             labels={labels}
             labelsError={labelsError}
+            items={items}
+            itemsLoading={itemsLoading}
+            itemsError={itemsError}
+            onItemsChange={setItems}
           />
         );
       case 'labels':

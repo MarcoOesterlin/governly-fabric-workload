@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   Badge,
   DataGrid,
@@ -60,6 +60,10 @@ interface ItemsViewProps {
   workspaceError?: string;
   labels: SensitivityLabel[];
   labelsError?: string;
+  items: FabricItem[];
+  itemsLoading: boolean;
+  itemsError?: string;
+  onItemsChange: (items: FabricItem[]) => void;
 }
 
 interface StatusMessage {
@@ -67,68 +71,27 @@ interface StatusMessage {
   text: string;
 }
 
-export const ItemsView: React.FC<ItemsViewProps> = ({ apiClient, workspaceId, workspaceError, labels, labelsError }) => {
+export const ItemsView: React.FC<ItemsViewProps> = ({
+  apiClient, workspaceId, workspaceError, labels, labelsError,
+  items, itemsLoading, itemsError, onItemsChange,
+}) => {
   const { t } = useTranslation();
-  const [loading, setLoading] = useState(true);
-  const [items, setItems] = useState<FabricItem[]>([]);
   const [statusMsg, setStatusMsg] = useState<StatusMessage | null>(null);
-  const [apiError, setApiError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    if (workspaceId) {
-      setLoading(true);
-      setApiError(null);
-
-      const fetchAll = async () => {
-        const all: FabricItem[] = [];
-        let token: string | undefined;
-        do {
-          const page = await apiClient.listItems({ workspaceId, continuationToken: token });
-          all.push(...page.items);
-          token = page.continuationToken;
-        } while (token);
-        return all;
-      };
-
-      fetchAll()
-        .then((fetched) => {
-          if (cancelled) return;
-          console.log('[Governly] listItems returned', fetched.length, 'items');
-          setItems(fetched);
-          setLoading(false);
-        })
-        .catch((err: any) => {
-          if (cancelled) return;
-          console.error('[Governly] listItems failed:', err);
-          const msg: string =
-            err?.message ??
-            (typeof err === 'object' ? JSON.stringify(err) : String(err));
-          setApiError(msg);
-          setItems([]);
-          setLoading(false);
-        });
-    }
-    return () => { cancelled = true; };
-  }, [apiClient, workspaceId]);
 
   const handleLabelChange = useCallback(async (item: FabricItem, labelId: string) => {
     try {
       await apiClient.bulkSetLabels([{ id: item.id, type: item.type }], labelId);
       const labelName = labels.find(l => l.id === labelId)?.name;
-      setItems(prev =>
-        prev.map(i =>
-          i.id === item.id
-            ? { ...i, sensitivity: { labelId, labelName } }
-            : i
-        )
+      onItemsChange(
+        items.map(i => i.id === item.id ? { ...i, sensitivity: { labelId, labelName } } : i)
       );
       setStatusMsg({ type: 'success', text: t('Classifier_Items_LabelUpdated', 'Label updated.') });
     } catch {
       setStatusMsg({ type: 'error', text: t('Classifier_Items_LabelError', 'Failed to update label.') });
     }
     setTimeout(() => setStatusMsg(null), 3000);
-  }, [apiClient, labels, t]);
+  }, [apiClient, labels, items, onItemsChange, t]);
 
   const columns: TableColumnDefinition<FabricItem>[] = useMemo(() => [
     createTableColumn<FabricItem>({
@@ -185,7 +148,7 @@ export const ItemsView: React.FC<ItemsViewProps> = ({ apiClient, workspaceId, wo
     );
   }
 
-  if (loading) {
+  if (itemsLoading) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 32 }}>
         <Spinner size="medium" />
@@ -194,11 +157,11 @@ export const ItemsView: React.FC<ItemsViewProps> = ({ apiClient, workspaceId, wo
     );
   }
 
-  if (apiError) {
+  if (itemsError) {
     return (
       <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <MessageBar intent="error">
-          <MessageBarBody><strong>Failed to load workspace items:</strong> {apiError}</MessageBarBody>
+          <MessageBarBody><strong>Failed to load workspace items:</strong> {itemsError}</MessageBarBody>
         </MessageBar>
         <Text size={200} style={{ color: '#555' }}>
           Tip: Make sure you are logged in with <code>az login</code> and the Dev Gateway is running.
