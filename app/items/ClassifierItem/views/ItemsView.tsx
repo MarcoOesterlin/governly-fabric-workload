@@ -25,10 +25,10 @@ interface LabelBadgeProps {
 }
 
 const LabelBadge: React.FC<LabelBadgeProps> = ({ labelId, labelName, labels }) => {
-  if (!labelId) {
+  if (!labelId && !labelName) {
     return <Text size={200} style={{ color: '#999', fontStyle: 'italic' }}>None</Text>;
   }
-  const label = labels.find(l => l.id === labelId);
+  const label = labels.find(l => l.id?.toLowerCase() === labelId?.toLowerCase());
   const color = label?.color;
   const name = label?.name ?? labelName ?? labelId;
   return (

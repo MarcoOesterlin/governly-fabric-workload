@@ -1,12 +1,6 @@
 import { WorkloadClientAPI } from '@ms-fabric/workload-client';
-import { FabricAuthenticationService } from './FabricAuthenticationService';
 
-const FABRIC_API = 'https://api.fabric.microsoft.com/v1';
-const GRAPH_API = 'https://graph.microsoft.com/beta';
-const FABRIC_SCOPE = 'https://api.fabric.microsoft.com/.default';
-const GRAPH_SCOPE = 'https://graph.microsoft.com/.default';
-
-// Fabric bulkSetLabels / bulkRemoveLabels accept up to 2,000 items per request.
+// Fabric constructs are batch-limited to 2,000 items per request.
 const BATCH_SIZE = 2000;
 
 export interface FabricItem {
@@ -66,61 +60,69 @@ export interface BulkOperationResult {
   failures: Array<{ itemId: string; errorMessage: string }>;
 }
 
+/**
+ * GovernlyApiClient
+ *
+ * Routes all Fabric, Graph, and PowerBI API calls through the devServer proxy
+ * at /api/proxy. Graph calls acquire a token from the Fabric SDK
+ * (acquireFrontendAccessToken) — the user is already authenticated in Fabric so
+ * no extra login is required. The token is sent in the proxy request body and
+ * used directly by the proxy, keeping the auth flow identical in dev and prod.
+ */
 export class GovernlyApiClient {
-  private authService: FabricAuthenticationService;
-
-  constructor(workloadClient: WorkloadClientAPI) {
-    this.authService = new FabricAuthenticationService(workloadClient);
+  constructor(_workloadClient?: WorkloadClientAPI) {
+    // workloadClient reserved for future Fabric SDK calls
   }
 
-  private async request<T>(baseUrl: string, scope: string, path: string, options?: RequestInit): Promise<T> {
-    const { token } = await this.authService.acquireAccessToken(scope);
-    const response = await fetch(`${baseUrl}${path}`, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-        ...(options?.headers ?? {}),
-      },
+  /**
+   * Send a request through the devServer API proxy.
+   * All auth (Fabric, Graph, PowerBI) is handled server-side in the proxy.
+   */
+  private async proxyRequest<T>(
+    api: 'fabric' | 'graph' | 'powerbi',
+    path: string,
+    options?: { method?: string; body?: unknown }
+  ): Promise<T> {
+    const response = await fetch('/api/proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        api,
+        method: options?.method ?? 'GET',
+        path,
+        body: options?.body,
+      }),
     });
+
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`API ${response.status}: ${text}`);
+      throw new Error(`${api} API ${response.status}: ${text}`);
     }
+    if (response.status === 204) return undefined as unknown as T;
+
     const contentType = response.headers.get('content-type') ?? '';
-    if (response.status === 204 || !contentType.includes('application/json')) {
-      return undefined as unknown as T;
-    }
+    if (!contentType.includes('application/json')) return undefined as unknown as T;
+
     return response.json() as Promise<T>;
   }
 
-  private fabric<T>(path: string, options?: RequestInit): Promise<T> {
-    return this.request<T>(FABRIC_API, FABRIC_SCOPE, path, options);
+  private fabric<T>(path: string, options?: { method?: string; body?: unknown }): Promise<T> {
+    return this.proxyRequest<T>('fabric', path, options);
   }
 
-  private graph<T>(path: string, options?: RequestInit): Promise<T> {
-    return this.request<T>(GRAPH_API, GRAPH_SCOPE, path, options);
+  private graph<T>(path: string, options?: { method?: string; body?: unknown }): Promise<T> {
+    return this.proxyRequest<T>('graph', path, options);
   }
 
   async listWorkspaceItems(workspaceId: string): Promise<FabricItem[]> {
     const all: FabricItem[] = [];
-    let continuationUri: string | undefined =
-      `${FABRIC_API}/workspaces/${workspaceId}/items`;
+    let path: string | null = `/workspaces/${workspaceId}/items`;
 
-    while (continuationUri) {
-      const { token } = await this.authService.acquireAccessToken(FABRIC_SCOPE);
-      const response = await fetch(continuationUri, {
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`Fabric API ${response.status}: ${text}`);
-      }
-      const data: { value: any[]; continuationUri?: string } = await response.json();
+    while (path) {
+      const data = await this.fabric<{ value: any[]; continuationUri?: string }>(path);
       for (const i of data.value ?? []) {
+        // Exclude Governly's own workload items from the list
+        if (typeof i.type === 'string' && i.type.startsWith('Org.Governly')) continue;
         all.push({
           id: i.id,
           type: i.type,
@@ -128,8 +130,19 @@ export class GovernlyApiClient {
           workspaceId: i.workspaceId ?? workspaceId,
         });
       }
-      continuationUri = data.continuationUri;
+      // Extract path portion from continuationUri for the next proxy call
+      if (data.continuationUri) {
+        try {
+          const u = new URL(data.continuationUri);
+          path = u.pathname.replace(/^\/v1/, '') + u.search;
+        } catch {
+          path = null;
+        }
+      } else {
+        path = null;
+      }
     }
+
     return all;
   }
 
@@ -146,28 +159,40 @@ export class GovernlyApiClient {
     const data = await this.fabric<{ itemEntities: any[]; continuationToken?: string }>(
       `/admin/items${qs}`
     );
+    const entities = data.itemEntities ?? [];
+    if (entities.length > 0) {
+      console.log('[Governly] admin/items sample item keys:', Object.keys(entities[0]));
+      console.log('[Governly] admin/items sample item:', JSON.stringify(entities[0]));
+      const withSensitivity = entities.find((i: any) => i.sensitivity);
+      if (withSensitivity) {
+        console.log('[Governly] admin/items sample sensitivity:', JSON.stringify(withSensitivity.sensitivity));
+      }
+    }
     return {
-      items: (data.itemEntities ?? []).map(i => ({
-        id: i.id,
-        type: i.type,
-        displayName: i.displayName,
-        workspaceId: i.workspaceId,
-        sensitivity: i.sensitivity
-          ? { labelId: i.sensitivity.labelId, labelName: i.sensitivity.labelDisplayName }
-          : undefined,
-      })),
+      items: entities.map((i: any) => {
+        const s = i.sensitivity;
+        const labelId = s?.labelId ?? s?.id ?? s?.sensitivityLabelId;
+        const labelName = s?.labelDisplayName ?? s?.displayName ?? s?.name ?? s?.labelName;
+        return {
+          id: i.id,
+          type: i.type,
+          displayName: i.displayName ?? i.name ?? i.artifactDisplayName ?? '(unnamed)',
+          workspaceId: i.workspaceId,
+          sensitivity: labelId ? { labelId: labelId.toLowerCase(), labelName } : undefined,
+        };
+      }),
       continuationToken: data.continuationToken,
     };
   }
 
   async listWorkspaces(): Promise<Workspace[]> {
     const data = await this.fabric<{ workspaces: any[] }>('/admin/workspaces');
-    return (data.workspaces ?? []).map(w => ({ id: w.id, displayName: w.displayName }));
+    return (data.workspaces ?? []).map((w) => ({ id: w.id, displayName: w.displayName }));
   }
 
   async listDomains(): Promise<Domain[]> {
     const data = await this.fabric<{ domains: any[] }>('/admin/domains');
-    return (data.domains ?? []).map(d => ({
+    return (data.domains ?? []).map((d) => ({
       id: d.id,
       displayName: d.displayName,
       description: d.description,
@@ -177,22 +202,24 @@ export class GovernlyApiClient {
 
   async listLakehouses(workspaceId: string): Promise<Lakehouse[]> {
     const data = await this.fabric<{ value: any[] }>(`/workspaces/${workspaceId}/lakehouses`);
-    return (data.value ?? []).map(l => ({ id: l.id, displayName: l.displayName }));
+    return (data.value ?? []).map((l) => ({ id: l.id, displayName: l.displayName }));
   }
 
   async listLakehouseTables(workspaceId: string, lakehouseId: string): Promise<LakehouseTable[]> {
     const data = await this.fabric<{ data: any[] }>(
       `/workspaces/${workspaceId}/lakehouses/${lakehouseId}/tables`
     );
-    return (data.data ?? []).map(t => ({ name: t.name, type: t.type, format: t.format ?? '' }));
+    return (data.data ?? []).map((t) => ({ name: t.name, type: t.type, format: t.format ?? '' }));
   }
 
   async listSensitivityLabels(): Promise<SensitivityLabel[]> {
+    // /v1.0/security/informationProtection/sensitivityLabels requires SensitivityLabels.Read.All
+    // (application permission) — works with the client credentials app token.
     const data = await this.graph<{ value: any[] }>(
       '/security/informationProtection/sensitivityLabels'
     );
-    return (data.value ?? []).map(l => ({
-      id: l.id,
+    return (data.value ?? []).map((l) => ({
+      id: l.id?.toLowerCase(),
       name: l.name,
       description: l.description,
       color: l.color,
@@ -213,16 +240,19 @@ export class GovernlyApiClient {
       try {
         const res = await this.fabric<{ failedItems?: any[] }>('/admin/items/bulkSetLabels', {
           method: 'POST',
-          body: JSON.stringify({
+          body: {
             items: batch,
             updateDetails: { sensitivityLabelId: labelId },
-          }),
+          },
         });
         const failed = res?.failedItems ?? [];
         result.failureCount += failed.length;
         result.successCount += batch.length - failed.length;
         result.failures.push(
-          ...failed.map((f: any) => ({ itemId: f.id, errorMessage: f.error?.message ?? 'Unknown error' }))
+          ...failed.map((f: any) => ({
+            itemId: f.id,
+            errorMessage: f.error?.message ?? 'Unknown error',
+          }))
         );
       } catch (e: any) {
         result.failureCount += batch.length;
@@ -241,13 +271,16 @@ export class GovernlyApiClient {
       try {
         const res = await this.fabric<{ failedItems?: any[] }>('/admin/items/bulkRemoveLabels', {
           method: 'POST',
-          body: JSON.stringify({ items: batch }),
+          body: { items: batch },
         });
         const failed = res?.failedItems ?? [];
         result.failureCount += failed.length;
         result.successCount += batch.length - failed.length;
         result.failures.push(
-          ...failed.map((f: any) => ({ itemId: f.id, errorMessage: f.error?.message ?? 'Unknown error' }))
+          ...failed.map((f: any) => ({
+            itemId: f.id,
+            errorMessage: f.error?.message ?? 'Unknown error',
+          }))
         );
       } catch (e: any) {
         result.failureCount += batch.length;
@@ -257,13 +290,15 @@ export class GovernlyApiClient {
     return result;
   }
 
-  // Applies a label (or removes if labelId is null) to every item in every
-  // workspace belonging to the given domain.
+  /**
+   * Apply or remove a label for every item in every workspace belonging to a domain.
+   * Pass null as labelId to remove labels.
+   */
   async updateDomainLabel(domainId: string, labelId: string | null): Promise<void> {
     const wsData = await this.fabric<{ workspaces: any[] }>(
       `/admin/domains/${domainId}/workspaces`
     );
-    const workspaces: Workspace[] = (wsData.workspaces ?? []).map(w => ({
+    const workspaces: Workspace[] = (wsData.workspaces ?? []).map((w) => ({
       id: w.id,
       displayName: w.displayName,
     }));
@@ -273,7 +308,7 @@ export class GovernlyApiClient {
       let token: string | undefined;
       do {
         const page = await this.listItems({ workspaceId: ws.id, continuationToken: token });
-        allItems.push(...page.items.map(item => ({ id: item.id, type: item.type })));
+        allItems.push(...page.items.map((item) => ({ id: item.id, type: item.type })));
         token = page.continuationToken;
       } while (token);
     }
