@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Badge,
   DataGrid,
   DataGridHeader,
   DataGridHeaderCell,
@@ -8,8 +9,8 @@ import {
   DataGridCell,
   TableColumnDefinition,
   createTableColumn,
-  Spinner,
   Text,
+  Spinner,
   MessageBar,
   MessageBarBody,
 } from '@fluentui/react-components';
@@ -17,11 +18,48 @@ import { useTranslation } from 'react-i18next';
 import { FabricItem, GovernlyApiClient, SensitivityLabel } from '../../../clients/GovernlyApiClient';
 import { LabelPicker } from '../components/LabelPicker';
 
+interface LabelBadgeProps {
+  labelId?: string;
+  labelName?: string;
+  labels: SensitivityLabel[];
+}
+
+const LabelBadge: React.FC<LabelBadgeProps> = ({ labelId, labelName, labels }) => {
+  if (!labelId) {
+    return <Text size={200} style={{ color: '#999', fontStyle: 'italic' }}>None</Text>;
+  }
+  const label = labels.find(l => l.id === labelId);
+  const color = label?.color;
+  const name = label?.name ?? labelName ?? labelId;
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+      {color && (
+        <span style={{
+          width: 10, height: 10,
+          borderRadius: 2,
+          backgroundColor: color,
+          border: '1px solid rgba(0,0,0,0.15)',
+          flexShrink: 0,
+          display: 'inline-block',
+        }} />
+      )}
+      <Badge
+        appearance="tint"
+        size="small"
+        style={color ? { backgroundColor: `${color}22`, color, border: `1px solid ${color}66` } : undefined}
+      >
+        {name}
+      </Badge>
+    </span>
+  );
+};
+
 interface ItemsViewProps {
   apiClient: GovernlyApiClient;
   workspaceId?: string;
   workspaceError?: string;
   labels: SensitivityLabel[];
+  labelsError?: string;
 }
 
 interface StatusMessage {
@@ -29,7 +67,7 @@ interface StatusMessage {
   text: string;
 }
 
-export const ItemsView: React.FC<ItemsViewProps> = ({ apiClient, workspaceId, workspaceError, labels }) => {
+export const ItemsView: React.FC<ItemsViewProps> = ({ apiClient, workspaceId, workspaceError, labels, labelsError }) => {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<FabricItem[]>([]);
@@ -41,17 +79,32 @@ export const ItemsView: React.FC<ItemsViewProps> = ({ apiClient, workspaceId, wo
     if (workspaceId) {
       setLoading(true);
       setApiError(null);
-      apiClient.listWorkspaceItems(workspaceId)
+
+      const fetchAll = async () => {
+        const all: FabricItem[] = [];
+        let token: string | undefined;
+        do {
+          const page = await apiClient.listItems({ workspaceId, continuationToken: token });
+          all.push(...page.items);
+          token = page.continuationToken;
+        } while (token);
+        return all;
+      };
+
+      fetchAll()
         .then((fetched) => {
           if (cancelled) return;
-          console.log('[Governly] listWorkspaceItems returned', fetched.length, 'items');
+          console.log('[Governly] listItems returned', fetched.length, 'items');
           setItems(fetched);
           setLoading(false);
         })
         .catch((err: any) => {
           if (cancelled) return;
-          console.error('[Governly] listWorkspaceItems failed:', err);
-          setApiError(err?.message ?? String(err));
+          console.error('[Governly] listItems failed:', err);
+          const msg: string =
+            err?.message ??
+            (typeof err === 'object' ? JSON.stringify(err) : String(err));
+          setApiError(msg);
           setItems([]);
           setLoading(false);
         });
@@ -89,8 +142,19 @@ export const ItemsView: React.FC<ItemsViewProps> = ({ apiClient, workspaceId, wo
       renderCell: (item) => item.type,
     }),
     createTableColumn<FabricItem>({
-      columnId: 'label',
-      renderHeaderCell: () => t('Classifier_Items_ColLabel', 'Sensitivity Label'),
+      columnId: 'currentLabel',
+      renderHeaderCell: () => t('Classifier_Items_ColCurrentLabel', 'Current Label'),
+      renderCell: (item) => (
+        <LabelBadge
+          labelId={item.sensitivity?.labelId}
+          labelName={item.sensitivity?.labelName}
+          labels={labels}
+        />
+      ),
+    }),
+    createTableColumn<FabricItem>({
+      columnId: 'changeLabel',
+      renderHeaderCell: () => t('Classifier_Items_ColChangeLabel', 'Change Label'),
       renderCell: (item) => (
         <LabelPicker
           labels={labels}
@@ -104,39 +168,52 @@ export const ItemsView: React.FC<ItemsViewProps> = ({ apiClient, workspaceId, wo
 
   if (workspaceError) {
     return (
-      <div style={{ padding: 32 }}>
+      <div style={{ padding: 24 }}>
         <MessageBar intent="error">
-          <MessageBarBody>
-            <strong>Workspace Error:</strong> {workspaceError}
-          </MessageBarBody>
+          <MessageBarBody><strong>Workspace Error:</strong> {workspaceError}</MessageBarBody>
         </MessageBar>
       </div>
     );
   }
 
-  if (!workspaceId || loading) {
+  if (!workspaceId) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 32 }}>
         <Spinner size="medium" />
-        <Text>{t('Classifier_Items_Loading', 'Loading items…')}</Text>
+        <Text>{t('Classifier_Items_ConnectingWorkspace', 'Connecting to workspace…')}</Text>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 32 }}>
+        <Spinner size="medium" />
+        <Text>{t('Classifier_Items_Loading', 'Loading workspace items…')}</Text>
       </div>
     );
   }
 
   if (apiError) {
     return (
-      <div style={{ padding: 32 }}>
+      <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <MessageBar intent="error">
-          <MessageBarBody>
-            <strong>Failed to load workspace items:</strong> {apiError}
-          </MessageBarBody>
+          <MessageBarBody><strong>Failed to load workspace items:</strong> {apiError}</MessageBarBody>
         </MessageBar>
+        <Text size={200} style={{ color: '#555' }}>
+          Tip: Make sure you are logged in with <code>az login</code> and the Dev Gateway is running.
+        </Text>
       </div>
     );
   }
 
   return (
     <div style={{ padding: 16 }}>
+      {labelsError && (
+        <MessageBar intent="warning" style={{ marginBottom: 12 }}>
+          <MessageBarBody><strong>Could not load sensitivity labels:</strong> {labelsError}</MessageBarBody>
+        </MessageBar>
+      )}
       {statusMsg && (
         <MessageBar intent={statusMsg.type === 'success' ? 'success' : 'error'} style={{ marginBottom: 12 }}>
           <MessageBarBody>{statusMsg.text}</MessageBarBody>

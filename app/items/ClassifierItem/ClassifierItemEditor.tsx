@@ -1,103 +1,237 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useLocation } from 'react-router-dom';
 import { WorkloadClientAPI } from '@ms-fabric/workload-client';
 import { useTranslation } from 'react-i18next';
-import { ArrowClockwise24Regular } from '@fluentui/react-icons';
-
-import { ItemEditor, RegisteredView, ViewContext } from '../../components/ItemEditor';
-import { Ribbon } from '../../components/ItemEditor/Ribbon';
-import { RibbonAction } from '../../components/ItemEditor/RibbonToolbar';
+import {
+  ArrowClockwise24Regular,
+  ShieldTask24Regular,
+  AppsList24Regular,
+  Tag24Regular,
+  BuildingMultiple24Regular,
+  Database24Regular,
+  DataPie24Regular,
+} from '@fluentui/react-icons';
 
 import { GovernlyApiClient, SensitivityLabel } from '../../clients/GovernlyApiClient';
 import { callGetItem } from '../../controller/ItemCRUDController';
 import { ItemsView } from './views/ItemsView';
+import { LabelsView } from './views/LabelsView';
+import { DomainsView } from './views/DomainsView';
+import { LakehousesView } from './views/LakehousesView';
+import { DashboardView } from './views/DashboardView';
 
 interface ClassifierItemEditorProps {
   workloadClient: WorkloadClientAPI;
 }
 
-interface ClassifierRibbonProps {
-  viewContext: ViewContext;
-  onRefresh: () => void;
+type ViewKey = 'items' | 'labels' | 'domains' | 'lakehouses' | 'dashboard';
+
+interface NavItem {
+  key: ViewKey;
+  labelKey: string;
+  defaultLabel: string;
+  icon: React.ReactElement;
 }
 
-const ClassifierRibbon: React.FC<ClassifierRibbonProps> = ({ viewContext, onRefresh }) => {
-  const { t } = useTranslation();
-  const homeActions: RibbonAction[] = [
-    {
-      key: 'refresh',
-      label: t('Classifier_Ribbon_Refresh', 'Refresh'),
-      icon: ArrowClockwise24Regular,
-      onClick: onRefresh,
-    },
-  ];
-  return <Ribbon homeToolbarActions={homeActions} viewContext={viewContext} />;
-};
+const NAV_ITEMS: NavItem[] = [
+  { key: 'items',      labelKey: 'Nav_Items',      defaultLabel: 'Items',      icon: <AppsList24Regular /> },
+  { key: 'labels',     labelKey: 'Nav_Labels',     defaultLabel: 'Labels',     icon: <Tag24Regular /> },
+  { key: 'domains',    labelKey: 'Nav_Domains',    defaultLabel: 'Domains',    icon: <BuildingMultiple24Regular /> },
+  { key: 'lakehouses', labelKey: 'Nav_Lakehouses', defaultLabel: 'Lakehouses', icon: <Database24Regular /> },
+  { key: 'dashboard',  labelKey: 'Nav_Dashboard',  defaultLabel: 'Dashboard',  icon: <DataPie24Regular /> },
+];
 
 const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadClient }) => {
   const { itemObjectId } = useParams<{ itemObjectId: string }>();
+  const location = useLocation();
+  const wsIdFromUrl = new URLSearchParams(location.search).get('wsId') ?? undefined;
+  const { t } = useTranslation();
 
   const apiClient = useMemo(() => new GovernlyApiClient(workloadClient), [workloadClient]);
 
+  const [activeView, setActiveView] = useState<ViewKey>('items');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [labels, setLabels] = useState<SensitivityLabel[]>([]);
+  const [labelsError, setLabelsError] = useState<string | undefined>();
   const [workspaceId, setWorkspaceId] = useState<string | undefined>();
   const [workspaceError, setWorkspaceError] = useState<string | undefined>();
 
   useEffect(() => {
-    apiClient.listSensitivityLabels().then(setLabels).catch(() => {});
+    apiClient.listSensitivityLabels()
+      .then(fetched => {
+        console.log('[Governly] Loaded', fetched.length, 'sensitivity labels');
+        setLabels(fetched);
+        setLabelsError(undefined);
+      })
+      .catch((err: any) => {
+        console.error('[Governly] listSensitivityLabels failed:', err);
+        setLabelsError(err?.message ?? String(err));
+      });
   }, [apiClient]);
 
   useEffect(() => {
     if (!itemObjectId) return;
-    console.log('[Governly] Resolving workspaceId for item:', itemObjectId);
-    callGetItem(workloadClient, itemObjectId)
+
+    if (wsIdFromUrl) {
+      console.log('[Governly] workspaceId from URL hint:', wsIdFromUrl);
+      setWorkspaceId(wsIdFromUrl);
+      setWorkspaceError(undefined);
+      return;
+    }
+
+    console.log('[Governly] Resolving workspaceId via callGetItem for item:', itemObjectId);
+
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Timed out resolving workspace (10s). Check the Dev Gateway is running.')), 10000)
+    );
+
+    Promise.race([callGetItem(workloadClient, itemObjectId), timeout])
       .then(result => {
         console.log('[Governly] callGetItem result:', JSON.stringify(result));
         if (result?.item?.workspaceId) {
-          console.log('[Governly] workspaceId resolved:', result.item.workspaceId);
           setWorkspaceId(result.item.workspaceId);
         } else {
-          console.warn('[Governly] workspaceId not found in item result:', result);
-          setWorkspaceError('Could not resolve workspace ID from item metadata.');
+          const devWsId = process.env.WORKSPACE_GUID;
+          if (devWsId) {
+            console.warn('[Governly] Using WORKSPACE_GUID fallback:', devWsId);
+            setWorkspaceId(devWsId);
+          } else {
+            setWorkspaceError('Could not resolve workspace ID from item metadata.');
+          }
         }
       })
       .catch((err: any) => {
         console.error('[Governly] callGetItem failed:', err);
-        setWorkspaceError(`Failed to load workspace context: ${err?.message ?? String(err)}`);
+        const devWsId = process.env.WORKSPACE_GUID;
+        if (devWsId) {
+          console.warn('[Governly] Using WORKSPACE_GUID fallback:', devWsId);
+          setWorkspaceId(devWsId);
+          return;
+        }
+        const msg = err?.message ?? err?.errorDescription
+          ?? (typeof err === 'object' ? JSON.stringify(err) : String(err));
+        setWorkspaceError(`Failed to load workspace context: ${msg}`);
       });
-  }, [workloadClient, itemObjectId]);
+  }, [workloadClient, itemObjectId, wsIdFromUrl]);
 
   const handleRefresh = useCallback(() => {
     setRefreshTrigger(prev => prev + 1);
   }, []);
 
-  const views: RegisteredView[] = useMemo(() => [
-    {
-      name: 'items',
-      component: (
-        <ItemsView
-          key={refreshTrigger}
-          apiClient={apiClient}
-          workspaceId={workspaceId}
-          workspaceError={workspaceError}
-          labels={labels}
-        />
-      ),
-    },
-  ], [apiClient, refreshTrigger, labels, workspaceId, workspaceError]);
+  const renderContent = () => {
+    switch (activeView) {
+      case 'items':
+        return (
+          <ItemsView
+            key={refreshTrigger}
+            apiClient={apiClient}
+            workspaceId={workspaceId}
+            workspaceError={workspaceError}
+            labels={labels}
+            labelsError={labelsError}
+          />
+        );
+      case 'labels':
+        return <LabelsView apiClient={apiClient} />;
+      case 'domains':
+        return <DomainsView apiClient={apiClient} />;
+      case 'lakehouses':
+        return <LakehousesView apiClient={apiClient} />;
+      case 'dashboard':
+        return <DashboardView apiClient={apiClient} onNavigateTo={(v) => setActiveView(v as ViewKey)} />;
+      default:
+        return null;
+    }
+  };
 
   return (
-    <ItemEditor
-      ribbon={(context: ViewContext) => (
-        <ClassifierRibbon
-          viewContext={context}
-          onRefresh={handleRefresh}
-        />
-      )}
-      views={views}
-      initialView="items"
-    />
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', fontFamily: 'var(--fontFamilyBase)' }}>
+      {/* ── Header ── */}
+      <div style={{
+        height: 48,
+        backgroundColor: '#0f6cbd',
+        color: '#fff',
+        display: 'flex',
+        alignItems: 'center',
+        padding: '0 16px',
+        gap: 10,
+        flexShrink: 0,
+        boxShadow: '0 2px 4px rgba(0,0,0,0.15)',
+      }}>
+        <ShieldTask24Regular style={{ flexShrink: 0 }} />
+        <span style={{ fontWeight: 600, fontSize: 16, letterSpacing: 0.2, flex: 1 }}>Governly</span>
+        <button
+          onClick={handleRefresh}
+          title={t('Classifier_Ribbon_Refresh', 'Refresh')}
+          style={{
+            background: 'rgba(255,255,255,0.15)',
+            border: 'none',
+            borderRadius: 4,
+            color: '#fff',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '4px 10px',
+            fontSize: 13,
+          }}
+        >
+          <ArrowClockwise24Regular style={{ width: 16, height: 16 }} />
+          {t('Classifier_Ribbon_Refresh', 'Refresh')}
+        </button>
+      </div>
+
+      {/* ── Body (sidebar + content) ── */}
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        {/* ── Sidebar ── */}
+        <div style={{
+          width: 220,
+          backgroundColor: '#fafafa',
+          borderRight: '1px solid #e0e0e0',
+          display: 'flex',
+          flexDirection: 'column',
+          flexShrink: 0,
+          paddingTop: 8,
+        }}>
+          {NAV_ITEMS.map(item => {
+            const isActive = activeView === item.key;
+            return (
+              <button
+                key={item.key}
+                onClick={() => setActiveView(item.key)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '10px 16px',
+                  background: isActive ? '#e8f0fe' : 'transparent',
+                  border: 'none',
+                  borderLeft: isActive ? '3px solid #0f6cbd' : '3px solid transparent',
+                  color: isActive ? '#0f6cbd' : '#333',
+                  fontWeight: isActive ? 600 : 400,
+                  fontSize: 14,
+                  cursor: 'pointer',
+                  width: '100%',
+                  textAlign: 'left',
+                  borderRadius: '0 4px 4px 0',
+                  marginBottom: 2,
+                }}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', color: isActive ? '#0f6cbd' : '#555', flexShrink: 0 }}>
+                  {item.icon}
+                </span>
+                {t(item.labelKey, item.defaultLabel)}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* ── Content ── */}
+        <div style={{ flex: 1, overflowY: 'auto', backgroundColor: '#fff' }}>
+          {renderContent()}
+        </div>
+      </div>
+    </div>
   );
 };
 
