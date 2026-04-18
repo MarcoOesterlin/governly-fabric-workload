@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   DataGrid,
   DataGridHeader,
@@ -8,72 +8,61 @@ import {
   DataGridCell,
   TableColumnDefinition,
   createTableColumn,
-  Combobox,
-  Option,
   Spinner,
   Text,
-  TableRowId,
+  MessageBar,
+  MessageBarBody,
 } from '@fluentui/react-components';
 import { useTranslation } from 'react-i18next';
-import { FabricItem, FabricItemsPage, GovernlyApiClient, Workspace } from '../../../clients/GovernlyApiClient';
+import { FabricItem, FabricItemsPage, GovernlyApiClient, SensitivityLabel } from '../../../clients/GovernlyApiClient';
+import { LabelPicker } from '../components/LabelPicker';
 
 interface ItemsViewProps {
   apiClient: GovernlyApiClient;
-  selectedItems: FabricItem[];
-  onSelectionChange: (items: FabricItem[]) => void;
+  labels: SensitivityLabel[];
 }
 
-type LabelFilter = 'all' | 'labeled' | 'unlabeled';
+interface StatusMessage {
+  type: 'success' | 'error';
+  text: string;
+}
 
-export const ItemsView: React.FC<ItemsViewProps> = ({
-  apiClient,
-  selectedItems,
-  onSelectionChange,
-}) => {
+export const ItemsView: React.FC<ItemsViewProps> = ({ apiClient, labels }) => {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<FabricItem[]>([]);
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const [filterWorkspaceId, setFilterWorkspaceId] = useState<string>('');
-  const [filterType, setFilterType] = useState<string>('');
-  const [filterLabel, setFilterLabel] = useState<LabelFilter>('all');
+  const [statusMsg, setStatusMsg] = useState<StatusMessage | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    Promise.all([
-      apiClient.listItems().catch((): FabricItemsPage => ({ items: [] })),
-      apiClient.listWorkspaces().catch((): Workspace[] => []),
-    ]).then(([page, ws]) => {
+    apiClient.listItems().catch((): FabricItemsPage => ({ items: [] })).then((page) => {
       if (cancelled) return;
       setItems(page.items || []);
-      setWorkspaces(ws);
       setLoading(false);
     });
     return () => { cancelled = true; };
   }, [apiClient]);
 
-  const itemTypes = useMemo(() => {
-    const types = new Set(items.map(i => i.type));
-    return Array.from(types).sort();
-  }, [items]);
+  const handleLabelChange = useCallback(async (item: FabricItem, labelId: string) => {
+    try {
+      await apiClient.bulkSetLabels([{ id: item.id, type: item.type }], labelId);
+      const labelName = labels.find(l => l.id === labelId)?.name;
+      setItems(prev =>
+        prev.map(i =>
+          i.id === item.id
+            ? { ...i, sensitivity: { labelId, labelName } }
+            : i
+        )
+      );
+      setStatusMsg({ type: 'success', text: t('Classifier_Items_LabelUpdated', 'Label updated.') });
+    } catch {
+      setStatusMsg({ type: 'error', text: t('Classifier_Items_LabelError', 'Failed to update label.') });
+    }
+    setTimeout(() => setStatusMsg(null), 3000);
+  }, [apiClient, labels, t]);
 
-  const filteredItems = useMemo(() => {
-    return items.filter(item => {
-      if (filterWorkspaceId && item.workspaceId !== filterWorkspaceId) return false;
-      if (filterType && item.type !== filterType) return false;
-      if (filterLabel === 'labeled' && !item.sensitivity?.labelId) return false;
-      if (filterLabel === 'unlabeled' && !!item.sensitivity?.labelId) return false;
-      return true;
-    });
-  }, [items, filterWorkspaceId, filterType, filterLabel]);
-
-  const selectedKeys = useMemo(
-    () => new Set<TableRowId>(selectedItems.map(i => i.id)),
-    [selectedItems]
-  );
-
-  const columns: TableColumnDefinition<FabricItem>[] = [
+  const columns: TableColumnDefinition<FabricItem>[] = useMemo(() => [
     createTableColumn<FabricItem>({
       columnId: 'name',
       renderHeaderCell: () => t('Classifier_Items_ColName', 'Name'),
@@ -91,10 +80,17 @@ export const ItemsView: React.FC<ItemsViewProps> = ({
     }),
     createTableColumn<FabricItem>({
       columnId: 'label',
-      renderHeaderCell: () => t('Classifier_Items_ColLabel', 'Current Label'),
-      renderCell: (item) => item.sensitivity?.labelName || '—',
+      renderHeaderCell: () => t('Classifier_Items_ColLabel', 'Sensitivity Label'),
+      renderCell: (item) => (
+        <LabelPicker
+          labels={labels}
+          value={item.sensitivity?.labelId}
+          onChange={(labelId) => handleLabelChange(item, labelId)}
+          placeholder={t('Classifier_Items_NoLabel', 'No label')}
+        />
+      ),
     }),
-  ];
+  ], [t, labels, handleLabelChange]);
 
   if (loading) {
     return (
@@ -107,63 +103,23 @@ export const ItemsView: React.FC<ItemsViewProps> = ({
 
   return (
     <div style={{ padding: 16 }}>
-      {/* Filter bar */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-        <Combobox
-          placeholder={t('Classifier_Items_FilterWorkspace', 'Workspace')}
-          value={workspaces.find(w => w.id === filterWorkspaceId)?.displayName || ''}
-          onOptionSelect={(_, data) => setFilterWorkspaceId(data.optionValue || '')}
-          clearable
-          style={{ minWidth: 180 }}
-        >
-          <Option value="">All workspaces</Option>
-          {workspaces.map(ws => (
-            <Option key={ws.id} value={ws.id}>{ws.displayName}</Option>
-          ))}
-        </Combobox>
+      {statusMsg && (
+        <MessageBar intent={statusMsg.type === 'success' ? 'success' : 'error'} style={{ marginBottom: 12 }}>
+          <MessageBarBody>{statusMsg.text}</MessageBarBody>
+        </MessageBar>
+      )}
 
-        <Combobox
-          placeholder={t('Classifier_Items_FilterType', 'Item type')}
-          value={filterType}
-          onOptionSelect={(_, data) => setFilterType(data.optionValue || '')}
-          clearable
-          style={{ minWidth: 160 }}
-        >
-          <Option value="">All types</Option>
-          {itemTypes.map(type => (
-            <Option key={type} value={type}>{type}</Option>
-          ))}
-        </Combobox>
-
-        <Combobox
-          placeholder={t('Classifier_Items_FilterLabel', 'Label status')}
-          value={filterLabel}
-          onOptionSelect={(_, data) => setFilterLabel((data.optionValue || 'all') as LabelFilter)}
-          style={{ minWidth: 160 }}
-        >
-          <Option value="all">All</Option>
-          <Option value="labeled">Labeled</Option>
-          <Option value="unlabeled">Unlabeled</Option>
-        </Combobox>
-      </div>
-
-      {filteredItems.length === 0 ? (
-        <Text>{t('Classifier_Items_Empty', 'No items match the current filters.')}</Text>
+      {items.length === 0 ? (
+        <Text>{t('Classifier_Items_Empty', 'No items found in this workspace.')}</Text>
       ) : (
         <DataGrid
-          items={filteredItems}
+          items={items}
           columns={columns}
-          selectionMode="multiselect"
-          selectedItems={selectedKeys}
-          onSelectionChange={(_, data) => {
-            const selectedIds = data.selectedItems as Set<string>;
-            onSelectionChange(filteredItems.filter(i => selectedIds.has(i.id)));
-          }}
           getRowId={(item: FabricItem) => item.id}
           style={{ width: '100%' }}
         >
           <DataGridHeader>
-            <DataGridRow selectionCell={{ 'aria-label': t('Classifier_Items_SelectAll', 'Select all') }}>
+            <DataGridRow>
               {({ renderHeaderCell }) => (
                 <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>
               )}
@@ -171,10 +127,7 @@ export const ItemsView: React.FC<ItemsViewProps> = ({
           </DataGridHeader>
           <DataGridBody<FabricItem>>
             {({ item, rowId }) => (
-              <DataGridRow<FabricItem>
-                key={rowId}
-                selectionCell={{ 'aria-label': `Select ${item.displayName}` }}
-              >
+              <DataGridRow<FabricItem> key={rowId}>
                 {({ renderCell }) => (
                   <DataGridCell>{renderCell(item)}</DataGridCell>
                 )}
