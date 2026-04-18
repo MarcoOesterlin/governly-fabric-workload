@@ -81,11 +81,17 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
     };
 
     fetchAll()
-      .then(fetched => {
+      .then(async fetched => {
         if (cancelled) return;
         console.log('[Governly] listItems returned', fetched.length, 'items');
+        // Show items immediately, then enrich with sensitivity labels in background
         setItems(fetched);
-        setItemsLoading(false);
+        const enriched = await apiClient.enrichWithSensitivityLabels(fetched);
+        if (!cancelled) {
+          console.log('[Governly] sensitivity labels enriched');
+          setItems(enriched);
+          setItemsLoading(false);
+        }
       })
       .catch((err: any) => {
         if (cancelled) return;

@@ -160,29 +160,43 @@ export class GovernlyApiClient {
       `/admin/items${qs}`
     );
     const entities = data.itemEntities ?? [];
-    if (entities.length > 0) {
-      console.log('[Governly] admin/items sample item keys:', Object.keys(entities[0]));
-      console.log('[Governly] admin/items sample item:', JSON.stringify(entities[0]));
-      const withSensitivity = entities.find((i: any) => i.sensitivity);
-      if (withSensitivity) {
-        console.log('[Governly] admin/items sample sensitivity:', JSON.stringify(withSensitivity.sensitivity));
-      }
-    }
     return {
-      items: entities.map((i: any) => {
-        const s = i.sensitivity;
-        const labelId = s?.labelId ?? s?.id ?? s?.sensitivityLabelId;
-        const labelName = s?.labelDisplayName ?? s?.displayName ?? s?.name ?? s?.labelName;
-        return {
-          id: i.id,
-          type: i.type,
-          displayName: i.displayName ?? i.name ?? i.artifactDisplayName ?? '(unnamed)',
-          workspaceId: i.workspaceId,
-          sensitivity: labelId ? { labelId: labelId.toLowerCase(), labelName } : undefined,
-        };
-      }),
+      items: entities.map((i: any) => ({
+        id: i.id,
+        type: i.type,
+        displayName: i.name ?? i.displayName ?? '(unnamed)',
+        workspaceId: i.workspaceId,
+        sensitivity: undefined as FabricItem['sensitivity'], // populated separately via enrichWithSensitivityLabels
+      })),
       continuationToken: data.continuationToken,
     };
+  }
+
+  /** Fetch the applied sensitivity label for each item in parallel (batches of 10). */
+  async enrichWithSensitivityLabels(items: FabricItem[]): Promise<FabricItem[]> {
+    const BATCH = 10;
+    const result: FabricItem[] = [...items];
+    for (let i = 0; i < result.length; i += BATCH) {
+      const batch = result.slice(i, i + BATCH);
+      const labels = await Promise.all(
+        batch.map(item =>
+          this.fabric<any>(`/workspaces/${item.workspaceId}/items/${item.id}/sensitivityLabel`)
+            .catch((_err: unknown) => null as any)
+        )
+      );
+      labels.forEach((label, idx) => {
+        if (label?.labelId) {
+          result[i + idx] = {
+            ...result[i + idx],
+            sensitivity: {
+              labelId: label.labelId.toLowerCase(),
+              labelName: label.displayName ?? label.labelName,
+            },
+          };
+        }
+      });
+    }
+    return result;
   }
 
   async listWorkspaces(): Promise<Workspace[]> {
