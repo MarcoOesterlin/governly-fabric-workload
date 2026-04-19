@@ -177,7 +177,9 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
         <span style={{ fontWeight: 600, fontSize: 16, letterSpacing: 0.2, flex: 1 }}>Governly</span>
         {workspaceId && (
           <button
-            onClick={() => window.open(`https://app.fabric.microsoft.com/groups/${workspaceId}`, '_blank')}
+            onClick={() => workloadClient.navigation.openBrowserTab({
+              url: `https://app.fabric.microsoft.com/groups/${workspaceId}`,
+            })}
             title="Open workspace in Fabric"
             style={{
               background: 'rgba(255,255,255,0.15)',
