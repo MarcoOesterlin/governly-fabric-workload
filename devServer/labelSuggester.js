@@ -94,27 +94,56 @@ function assistantRequest(baseUrl, path, token, body, method) {
 function buildPrompt(items, labels) {
   const labelLines = labels
     .sort((a, b) => (a.sensitivity ?? 0) - (b.sensitivity ?? 0))
-    .map(l => `- "${l.name}" (id: ${l.id}) — ${l.description || 'No description'} [sensitivity: ${l.sensitivity ?? 0}]`)
+    .map(l => `  - "${l.name}" (id: ${l.id}) — ${l.description || 'No description'} [sensitivity: ${l.sensitivity ?? 0}]`)
     .join('\n');
 
-  const itemLines = items
-    .map(i => `- "${i.displayName}" (type: ${i.type}, id: ${i.id})`)
-    .join('\n');
+  const dataItems = items.filter(i =>
+    ['Lakehouse', 'Warehouse', 'KQLDatabase', 'SQLDatabase', 'SemanticModel'].includes(i.type)
+  );
+  const otherItems = items.filter(i =>
+    !['Lakehouse', 'Warehouse', 'KQLDatabase', 'SQLDatabase', 'SemanticModel'].includes(i.type)
+  );
 
-  return `I need you to suggest sensitivity labels for workspace items.
-Examine the data in available sources to understand what they contain.
+  const dataItemLines = dataItems.map(i => `  - "${i.displayName}" (type: ${i.type}, id: ${i.id})`).join('\n');
+  const otherItemLines = otherItems.map(i => `  - "${i.displayName}" (type: ${i.type}, id: ${i.id})`).join('\n');
 
-Available sensitivity labels (ordered by sensitivity, lowest to highest):
+  return `You are a data governance classifier. Your task is to suggest the MOST APPROPRIATE sensitivity label for each workspace item listed below.
+
+STEP 1 — QUERY DATA SOURCES:
+For EACH data item below, run "SELECT TOP 5 * FROM <table>" on every table in that source. Examine the column names AND the actual row values returned.
+
+Data items to inspect:
+${dataItemLines}
+
+STEP 2 — CLASSIFY BASED ON EVIDENCE:
+Use these rules strictly (apply the HIGHEST matching label):
+
+  If ANY table contains columns or values resembling personal identifiers (names, emails, phone numbers, SSNs, national IDs, addresses, dates of birth, IP addresses, health records, biometric data):
+    → Use the HIGHEST sensitivity label available.
+
+  If tables contain financial data (revenue, pricing, salary, transactions, costs, bank details, invoices) or proprietary business logic:
+    → Use the second-highest sensitivity label (Confidential tier).
+
+  If tables contain only internal operational data (logs, configs, metrics, schedules) with NO personal or financial data:
+    → Use a mid-level label (General/Internal tier).
+
+  If tables contain only public reference data (country codes, currency lists, public holidays, zip codes):
+    → Use the LOWEST sensitivity label.
+
+Available sensitivity labels (ordered lowest → highest):
 ${labelLines}
 
-Workspace items to classify:
-${itemLines}
+STEP 3 — CLASSIFY NON-DATA ITEMS:
+For items that don't store data directly, classify based on what data they likely process given their name:
+${otherItemLines}
 
-For data items (Lakehouse, Warehouse, KQLDatabase, SQLDatabase), query the actual tables to understand what data they contain before suggesting a label.
-For non-data items (Notebook, Pipeline, Report, SemanticModel), suggest based on the item name and type context.
+IMPORTANT:
+- Do NOT default everything to the same label. Different data sources contain different data — differentiate.
+- When in doubt, classify UP (more sensitive), not down.
+- You MUST query the tables before classifying. Do not guess from names alone for data items.
 
-Respond ONLY with a JSON array, no other text:
-[{"itemId": "<item id>", "suggestedLabelId": "<label id>", "reason": "<brief explanation>"}]`;
+Respond with ONLY a JSON array (no markdown, no explanation outside the array):
+[{"itemId": "<item id>", "suggestedLabelId": "<label id>", "reason": "<what columns/data you found that drove your decision>"}]`;
 }
 
 // ── Parse suggestions from agent response ─────────────────────────────────────
