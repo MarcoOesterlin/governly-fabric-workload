@@ -298,15 +298,16 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
           {dataAgentStatus === 'done' ? (
             <>
               <span>✅ {dataAgentResult?.message}</span>
-              {dataAgentResult?.notebookUrl && (
-                <a
-                  href={dataAgentResult.notebookUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ color: 'inherit', fontWeight: 600 }}
+              {dataAgentResult?.notebookId && workspaceId && (
+                <button
+                  onClick={() => {
+                    const url = `https://app.fabric.microsoft.com/groups/${workspaceId}/synapsenotebooks/${dataAgentResult.notebookId}`;
+                    workloadClient.navigation.openBrowserTab({ url }).catch(console.error);
+                  }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontWeight: 600, padding: 0, textDecoration: 'underline' }}
                 >
                   Open notebook →
-                </a>
+                </button>
               )}
             </>
           ) : (

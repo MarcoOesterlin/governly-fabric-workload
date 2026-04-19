@@ -195,6 +195,33 @@ async function getOperationResult(token, operationId) {
   return JSON.parse(resp.body);
 }
 
+/**
+ * Poll a notebook job instance status for up to maxWaitMs.
+ * Returns the last known job status object (never throws — used for diagnostics).
+ */
+async function pollJobStatus(token, workspaceId, notebookId, jobInstanceId, maxWaitMs = 30_000) {
+  const start   = Date.now();
+  const pollUrl = `${FABRIC_API}/workspaces/${workspaceId}/items/${notebookId}/jobs/instances/${jobInstanceId}`;
+  let   last    = { status: 'Unknown' };
+
+  while (Date.now() - start < maxWaitMs) {
+    await new Promise(r => setTimeout(r, 5000));
+    try {
+      const resp = await httpRequest(pollUrl, { headers: { Authorization: `Bearer ${token}` } });
+      if (resp.ok) {
+        last = JSON.parse(resp.body);
+        console.log(`[DataAgent] Job status: ${last.status}`);
+        if (['Completed', 'Failed', 'Cancelled', 'Deduped'].includes(last.status)) return last;
+      } else {
+        console.warn(`[DataAgent] Job status poll ${resp.status}: ${resp.body.slice(0, 100)}`);
+      }
+    } catch (e) {
+      console.warn(`[DataAgent] Job status poll error: ${e.message}`);
+    }
+  }
+  return last;
+}
+
 // ── Main provisioner ──────────────────────────────────────────────────────────
 
 /**
@@ -270,12 +297,17 @@ async function provisionDataAgent(token, workspaceId, instanceName) {
   const notebookUrl = `https://app.fabric.microsoft.com/groups/${workspaceId}/notebooks/${notebookId}`;
 
   // ── Trigger notebook run ───────────────────────────────────────────────────
-  let jobTriggered = false;
+  let jobTriggered  = false;
+  let jobInstanceId = null;
+  let jobStatus     = null;
+  let jobError      = null;
+
   try {
-    const runBody    = JSON.stringify({ executionData: {} });
+    // Empty body — no extra fields that could confuse the API
+    const runBody    = '{}';
     const runHeaders = {
-      Authorization:  `Bearer ${token}`,
-      'Content-Type': 'application/json',
+      Authorization:    `Bearer ${token}`,
+      'Content-Type':   'application/json',
       'Content-Length': String(Buffer.byteLength(runBody)),
     };
 
@@ -285,24 +317,53 @@ async function provisionDataAgent(token, workspaceId, instanceName) {
       { method: 'POST', headers: runHeaders, body: runBody }
     );
 
-    if (runResp.status === 202 || runResp.ok) {
+    console.log(`[DataAgent] Trigger response ${runResp.status}: ${runResp.body.slice(0, 300)}`);
+
+    if (runResp.status === 202) {
       jobTriggered = true;
-      console.log(`[DataAgent] Notebook job triggered ✓`);
+
+      // Parse job instance ID from Location header
+      const location = runResp.headers['location'] || runResp.headers['Location'] || '';
+      const jobMatch = location.match(/\/jobs\/instances\/([^/?]+)/i);
+      if (jobMatch) {
+        jobInstanceId = jobMatch[1];
+        console.log(`[DataAgent] Job instance ID: ${jobInstanceId}`);
+
+        // Poll job status for up to 30 s to catch fast failures
+        jobStatus = await pollJobStatus(token, workspaceId, notebookId, jobInstanceId, 30_000);
+        console.log(`[DataAgent] Job status after 30 s: ${jobStatus.status}`);
+        if (jobStatus.failureReason) {
+          jobError = jobStatus.failureReason.message || JSON.stringify(jobStatus.failureReason);
+          console.warn(`[DataAgent] Job failed: ${jobError}`);
+        }
+      }
     } else {
-      console.warn(`[DataAgent] Run trigger returned ${runResp.status}: ${runResp.body.slice(0, 200)}`);
+      console.warn(`[DataAgent] Run trigger returned ${runResp.status}: ${runResp.body.slice(0, 400)}`);
+      jobError = `Trigger returned HTTP ${runResp.status}: ${runResp.body.slice(0, 200)}`;
     }
   } catch (runErr) {
     console.warn(`[DataAgent] Could not auto-trigger notebook: ${runErr.message}`);
+    jobError = runErr.message;
   }
+
+  const jobInstanceUrl = jobInstanceId
+    ? `${FABRIC_API}/workspaces/${workspaceId}/items/${notebookId}/jobs/instances/${jobInstanceId}`
+    : null;
 
   return {
     notebookId,
     notebookName,
     notebookUrl,
     jobTriggered,
-    message: jobTriggered
-      ? `Notebook created and triggered. The Data Agent will be ready once the run completes.`
-      : `Notebook created. Open it in Fabric and run all cells to create the Data Agent.`,
+    jobInstanceId,
+    jobInstanceUrl,
+    jobStatus:   jobStatus?.status ?? null,
+    jobError,
+    message: jobError
+      ? `Notebook created, but job failed to run: ${jobError}. Open the notebook in Fabric and run it manually.`
+      : jobTriggered
+        ? `Notebook created and job triggered (${jobStatus?.status ?? 'running'}). The Data Agent will be ready once the run completes.`
+        : `Notebook created. Open it in Fabric and run all cells to create the Data Agent.`,
   };
 }
 
