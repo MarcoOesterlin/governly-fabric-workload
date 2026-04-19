@@ -92,58 +92,84 @@ function assistantRequest(baseUrl, path, token, body, method) {
 // ── Build the structured prompt ───────────────────────────────────────────────
 
 function buildPrompt(items, labels) {
-  const labelLines = labels
-    .sort((a, b) => (a.sensitivity ?? 0) - (b.sensitivity ?? 0))
-    .map(l => `  - "${l.name}" (id: ${l.id}) — ${l.description || 'No description'} [sensitivity: ${l.sensitivity ?? 0}]`)
+  const sorted = [...labels].sort((a, b) => (a.sensitivity ?? 0) - (b.sensitivity ?? 0));
+  const labelLines = sorted
+    .map(l => `  - "${l.name}" (id: ${l.id}) [sensitivity rank: ${l.sensitivity ?? 0}]${l.description ? ' — ' + l.description : ''}`)
     .join('\n');
 
-  const dataItems = items.filter(i =>
-    ['Lakehouse', 'Warehouse', 'KQLDatabase', 'SQLDatabase', 'SemanticModel'].includes(i.type)
-  );
-  const otherItems = items.filter(i =>
-    !['Lakehouse', 'Warehouse', 'KQLDatabase', 'SQLDatabase', 'SemanticModel'].includes(i.type)
-  );
+  const itemLines = items
+    .map(i => `  - "${i.displayName}" (type: ${i.type}, id: ${i.id})`)
+    .join('\n');
 
-  const dataItemLines = dataItems.map(i => `  - "${i.displayName}" (type: ${i.type}, id: ${i.id})`).join('\n');
-  const otherItemLines = otherItems.map(i => `  - "${i.displayName}" (type: ${i.type}, id: ${i.id})`).join('\n');
+  // Build dynamic label references by position
+  const lowest = sorted[0];
+  const highest = sorted[sorted.length - 1];
+  const secondHighest = sorted.length >= 3 ? sorted[sorted.length - 2] : highest;
+  const midLevel = sorted.length >= 4 ? sorted[1] : lowest;
 
-  return `You are a data governance classifier. Your task is to suggest the MOST APPROPRIATE sensitivity label for each workspace item listed below.
+  return `You are a data classification engine. You MUST classify each workspace item by querying its actual data.
 
-STEP 1 — QUERY DATA SOURCES:
-For EACH data item below, run "SELECT TOP 5 * FROM <table>" on every table in that source. Examine the column names AND the actual row values returned.
+WORKSPACE ITEMS TO CLASSIFY:
+${itemLines}
 
-Data items to inspect:
-${dataItemLines}
-
-STEP 2 — CLASSIFY BASED ON EVIDENCE:
-Use these rules strictly (apply the HIGHEST matching label):
-
-  If ANY table contains columns or values resembling personal identifiers (names, emails, phone numbers, SSNs, national IDs, addresses, dates of birth, IP addresses, health records, biometric data):
-    → Use the HIGHEST sensitivity label available.
-
-  If tables contain financial data (revenue, pricing, salary, transactions, costs, bank details, invoices) or proprietary business logic:
-    → Use the second-highest sensitivity label (Confidential tier).
-
-  If tables contain only internal operational data (logs, configs, metrics, schedules) with NO personal or financial data:
-    → Use a mid-level label (General/Internal tier).
-
-  If tables contain only public reference data (country codes, currency lists, public holidays, zip codes):
-    → Use the LOWEST sensitivity label.
-
-Available sensitivity labels (ordered lowest → highest):
+AVAILABLE SENSITIVITY LABELS (lowest → highest sensitivity):
 ${labelLines}
 
-STEP 3 — CLASSIFY NON-DATA ITEMS:
-For items that don't store data directly, classify based on what data they likely process given their name:
-${otherItemLines}
+═══════════════════════════════════════════
+STEP 1: QUERY EVERY DATA SOURCE
+═══════════════════════════════════════════
+For each Lakehouse/Warehouse/SQLEndpoint, list all available tables across ALL schemas (not just dbo), then run:
+  SELECT TOP 5 * FROM <schema>.<table>
+on each table. Record the column names and sample values you see.
 
-IMPORTANT:
-- Do NOT default everything to the same label. Different data sources contain different data — differentiate.
-- When in doubt, classify UP (more sensitive), not down.
-- You MUST query the tables before classifying. Do not guess from names alone for data items.
+═══════════════════════════════════════════
+STEP 2: CLASSIFY USING THESE RULES
+═══════════════════════════════════════════
+Apply rules in order. Use the FIRST rule that matches:
 
-Respond with ONLY a JSON array (no markdown, no explanation outside the array):
-[{"itemId": "<item id>", "suggestedLabelId": "<label id>", "reason": "<what columns/data you found that drove your decision>"}]`;
+RULE A → "${highest.name}" (${highest.id})
+  Columns or values contain direct personal identifiers:
+  full names, email addresses, phone numbers, SSNs, passport numbers,
+  physical home addresses, dates of birth, medical/health records,
+  biometric data, passwords, credit card or bank account numbers.
+
+RULE B → "${secondHighest.name}" (${secondHighest.id})
+  Columns or values contain trackable/sensitive operational data:
+  • GPS coordinates, latitude/longitude (e.g. pickup_latitude, dropoff_longitude)
+  • Detailed financial transactions per record (fare_amount, tip_amount, total_amount, payment_type)
+  • Trip/journey records with timestamps + locations (these can re-identify individuals)
+  • Salary, invoice, or revenue data at individual-record level
+  • Customer IDs combined with behavioral data
+
+RULE C → "${midLevel.name}" (${midLevel.id})
+  Data is internal operational without personal or financial detail:
+  aggregated metrics, pipeline configs, system logs, internal reference mappings,
+  non-sensitive metadata, operational schedules.
+
+RULE D → "${lowest.name}" (${lowest.id})
+  Data is entirely public and non-sensitive:
+  public holiday calendars, country/region codes, currency lists,
+  publicly available government statistics, open reference datasets.
+
+═══════════════════════════════════════════
+STEP 3: CLASSIFY NON-DATA ITEMS
+═══════════════════════════════════════════
+For items that are not data sources (Notebooks, Pipelines, Reports, SQLEndpoints that mirror a Lakehouse), assign the SAME label as the most sensitive data source they reference or share a name with.
+
+═══════════════════════════════════════════
+HARD CONSTRAINTS
+═══════════════════════════════════════════
+1. You MUST query tables before classifying. Do NOT guess from item names alone.
+2. Different data sources contain different data. Assigning every item the same label is WRONG.
+3. A lakehouse with only "publicholidays" is NOT the same sensitivity as one with trip records containing GPS + fares.
+4. When unsure between two labels, always choose the MORE sensitive one.
+5. If you cannot query a data source, classify it as "${secondHighest.name}" (assume sensitive until proven otherwise).
+
+═══════════════════════════════════════════
+OUTPUT FORMAT
+═══════════════════════════════════════════
+Respond with ONLY a raw JSON array. No markdown fences, no explanation text.
+[{"itemId":"<id>","suggestedLabelId":"<label id>","reason":"<specific columns/values found>"}]`;
 }
 
 // ── Parse suggestions from agent response ─────────────────────────────────────
