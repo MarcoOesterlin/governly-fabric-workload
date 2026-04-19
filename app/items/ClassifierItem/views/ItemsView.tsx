@@ -31,23 +31,30 @@ const LabelBadge: React.FC<LabelBadgeProps> = ({ labelId, labelName, labels }) =
   const label = labels.find(l => l.id?.toLowerCase() === labelId?.toLowerCase());
   const color = label?.color ?? '#888';
   const name = label?.name ?? labelName ?? labelId ?? '';
-  const tooltipContent = label?.description ? `${name} — ${label.description}` : name;
+  const tooltipContent = label?.description ?? name;
 
   return (
     <Tooltip content={tooltipContent} relationship="description" withArrow>
-      <span
-        style={{
-          display: 'inline-block',
-          width: 14,
-          height: 14,
-          borderRadius: 3,
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'default' }}>
+        <span style={{
+          width: 10, height: 10,
+          borderRadius: 2,
           backgroundColor: color,
           border: '1px solid rgba(0,0,0,0.2)',
-          cursor: 'default',
           flexShrink: 0,
-        }}
-        aria-label={name}
-      />
+          display: 'inline-block',
+        }} />
+        <span style={{
+          fontSize: 12,
+          padding: '1px 6px',
+          borderRadius: 3,
+          backgroundColor: `${color}22`,
+          color,
+          border: `1px solid ${color}66`,
+        }}>
+          {name}
+        </span>
+      </span>
     </Tooltip>
   );
 };
