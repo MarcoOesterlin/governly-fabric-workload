@@ -60,6 +60,14 @@ export interface BulkOperationResult {
   failures: Array<{ itemId: string; errorMessage: string }>;
 }
 
+export interface DataAgentProvisionResult {
+  notebookId: string;
+  notebookName: string;
+  notebookUrl: string;
+  jobTriggered: boolean;
+  message: string;
+}
+
 /**
  * GovernlyApiClient
  *
@@ -337,5 +345,25 @@ export class GovernlyApiClient {
     } else {
       await this.bulkRemoveLabels(allItems);
     }
+  }
+
+  /**
+   * Create a Fabric Notebook with the fabric-data-agent-sdk provisioning script
+   * and trigger it to run in the workspace. The notebook creates a "Governly Data Agent"
+   * and attaches all supported data sources (lakehouses, warehouses, etc.).
+   */
+  async provisionDataAgent(workspaceId: string, instanceName: string): Promise<DataAgentProvisionResult> {
+    const response = await fetch('/api/provision-data-agent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspaceId, instanceName }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Provision failed (${response.status}): ${text}`);
+    }
+
+    return response.json() as Promise<DataAgentProvisionResult>;
   }
 }

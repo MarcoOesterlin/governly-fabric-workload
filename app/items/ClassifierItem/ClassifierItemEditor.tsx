@@ -8,9 +8,10 @@ import {
   AppsList24Regular,
   Tag24Regular,
   Open24Regular,
+  Bot24Regular,
 } from '@fluentui/react-icons';
 
-import { GovernlyApiClient, FabricItem, SensitivityLabel } from '../../clients/GovernlyApiClient';
+import { GovernlyApiClient, FabricItem, SensitivityLabel, DataAgentProvisionResult } from '../../clients/GovernlyApiClient';
 import { callGetItem } from '../../controller/ItemCRUDController';
 import { ItemsView } from './views/ItemsView';
 import { LabelsView } from './views/LabelsView';
@@ -50,6 +51,10 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
   const [items, setItems] = useState<FabricItem[]>([]);
   const [itemsLoading, setItemsLoading] = useState(false);
   const [itemsError, setItemsError] = useState<string | undefined>();
+
+  const [dataAgentStatus, setDataAgentStatus] = useState<'idle' | 'provisioning' | 'done' | 'error'>('idle');
+  const [dataAgentResult, setDataAgentResult] = useState<DataAgentProvisionResult | undefined>();
+  const [dataAgentError, setDataAgentError] = useState<string | undefined>();
 
   useEffect(() => {
     apiClient.listSensitivityLabels()
@@ -136,6 +141,25 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
     setRefreshTrigger(prev => prev + 1);
   }, []);
 
+  const handleProvisionDataAgent = useCallback(() => {
+    if (!workspaceId || dataAgentStatus === 'provisioning') return;
+    setDataAgentStatus('provisioning');
+    setDataAgentError(undefined);
+    setDataAgentResult(undefined);
+
+    apiClient.provisionDataAgent(workspaceId, 'Governly')
+      .then(result => {
+        console.log('[Governly] Data Agent provisioned:', result);
+        setDataAgentResult(result);
+        setDataAgentStatus('done');
+      })
+      .catch((err: any) => {
+        console.error('[Governly] Data Agent provisioning failed:', err);
+        setDataAgentError(err?.message ?? String(err));
+        setDataAgentStatus('error');
+      });
+  }, [apiClient, workspaceId, dataAgentStatus]);
+
   const renderContent = () => {
     switch (activeView) {
       case 'items':
@@ -175,6 +199,39 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
       }}>
         <ShieldTask24Regular style={{ flexShrink: 0 }} />
         <span style={{ fontWeight: 600, fontSize: 16, letterSpacing: 0.2, flex: 1 }}>Governly</span>
+        {workspaceId && (
+          <button
+            onClick={handleProvisionDataAgent}
+            disabled={dataAgentStatus === 'provisioning'}
+            title={
+              dataAgentStatus === 'provisioning' ? 'Creating Data Agent notebook...' :
+              dataAgentStatus === 'done'          ? `${dataAgentResult?.message ?? 'Data Agent provisioned'} — click to re-run` :
+              dataAgentStatus === 'error'         ? `Error: ${dataAgentError} — click to retry` :
+              'Create a Fabric Data Agent for this workspace using fabric-data-agent-sdk'
+            }
+            style={{
+              background: dataAgentStatus === 'done'  ? 'rgba(100,200,100,0.25)' :
+                          dataAgentStatus === 'error' ? 'rgba(255,80,80,0.25)'  :
+                          'rgba(255,255,255,0.15)',
+              border: 'none',
+              borderRadius: 4,
+              color: '#fff',
+              cursor: dataAgentStatus === 'provisioning' ? 'default' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '4px 10px',
+              fontSize: 13,
+              opacity: dataAgentStatus === 'provisioning' ? 0.7 : 1,
+            }}
+          >
+            <Bot24Regular style={{ width: 16, height: 16 }} />
+            {dataAgentStatus === 'provisioning' ? 'Creating…' :
+             dataAgentStatus === 'done'         ? 'Data Agent ✓' :
+             dataAgentStatus === 'error'        ? 'Data Agent ✗' :
+             'Create Data Agent'}
+          </button>
+        )}
         {workspaceId && (
           <button
             onClick={() => {
@@ -225,6 +282,42 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
           {t('Classifier_Ribbon_Refresh', 'Refresh')}
         </button>
       </div>
+
+      {/* ── Data Agent notification banner ── */}
+      {(dataAgentStatus === 'done' || dataAgentStatus === 'error') && (
+        <div style={{
+          backgroundColor: dataAgentStatus === 'done' ? '#dff6dd' : '#fde7e9',
+          color:           dataAgentStatus === 'done' ? '#1a7237' : '#a4262c',
+          padding: '8px 16px',
+          fontSize: 13,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          flexShrink: 0,
+        }}>
+          {dataAgentStatus === 'done' ? (
+            <>
+              <span>✅ {dataAgentResult?.message}</span>
+              {dataAgentResult?.notebookUrl && (
+                <a
+                  href={dataAgentResult.notebookUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: 'inherit', fontWeight: 600 }}
+                >
+                  Open notebook →
+                </a>
+              )}
+            </>
+          ) : (
+            <span>❌ Data Agent provisioning failed: {dataAgentError}</span>
+          )}
+          <button
+            onClick={() => setDataAgentStatus('idle')}
+            style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: 16 }}
+          >×</button>
+        </div>
+      )}
 
       {/* ── Body (sidebar + content) ── */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
