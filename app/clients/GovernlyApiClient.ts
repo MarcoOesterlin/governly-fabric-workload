@@ -259,7 +259,7 @@ export class GovernlyApiClient {
           method: 'POST',
           body: {
             items: batch,
-            updateDetails: { sensitivityLabelId: labelId },
+            updateDetails: { labelId },
           },
         });
         const failed = res?.failedItems ?? [];
