@@ -1,6 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  Badge,
   DataGrid,
   DataGridHeader,
   DataGridHeaderCell,
@@ -13,6 +12,7 @@ import {
   Spinner,
   MessageBar,
   MessageBarBody,
+  Tooltip,
 } from '@fluentui/react-components';
 import { useTranslation } from 'react-i18next';
 import { FabricItem, GovernlyApiClient, SensitivityLabel } from '../../../clients/GovernlyApiClient';
@@ -29,28 +29,26 @@ const LabelBadge: React.FC<LabelBadgeProps> = ({ labelId, labelName, labels }) =
     return <Text size={200} style={{ color: '#999', fontStyle: 'italic' }}>None</Text>;
   }
   const label = labels.find(l => l.id?.toLowerCase() === labelId?.toLowerCase());
-  const color = label?.color;
-  const name = label?.name ?? labelName ?? labelId;
+  const color = label?.color ?? '#888';
+  const name = label?.name ?? labelName ?? labelId ?? '';
+  const tooltipContent = label?.description ? `${name} — ${label.description}` : name;
+
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-      {color && (
-        <span style={{
-          width: 10, height: 10,
-          borderRadius: 2,
-          backgroundColor: color,
-          border: '1px solid rgba(0,0,0,0.15)',
-          flexShrink: 0,
+    <Tooltip content={tooltipContent} relationship="description" withArrow>
+      <span
+        style={{
           display: 'inline-block',
-        }} />
-      )}
-      <Badge
-        appearance="tint"
-        size="small"
-        style={color ? { backgroundColor: `${color}22`, color, border: `1px solid ${color}66` } : undefined}
-      >
-        {name}
-      </Badge>
-    </span>
+          width: 14,
+          height: 14,
+          borderRadius: 3,
+          backgroundColor: color,
+          border: '1px solid rgba(0,0,0,0.2)',
+          cursor: 'default',
+          flexShrink: 0,
+        }}
+        aria-label={name}
+      />
+    </Tooltip>
   );
 };
 
