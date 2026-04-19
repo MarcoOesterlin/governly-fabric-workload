@@ -13,6 +13,7 @@ import {
   MessageBar,
   MessageBarBody,
   Tooltip,
+  Button,
 } from '@fluentui/react-components';
 import { useTranslation } from 'react-i18next';
 import { FabricItem, GovernlyApiClient, SensitivityLabel } from '../../../clients/GovernlyApiClient';
@@ -82,28 +83,73 @@ export const ItemsView: React.FC<ItemsViewProps> = ({
 }) => {
   const { t } = useTranslation();
   const [statusMsg, setStatusMsg] = useState<StatusMessage | null>(null);
+  const [pendingChanges, setPendingChanges] = useState<Record<string, string>>({});
+  const [applying, setApplying] = useState(false);
 
+  const hasPending = Object.keys(pendingChanges).length > 0;
 
-  const handleLabelChange = useCallback(async (item: FabricItem, labelId: string) => {
-    try {
-      const result = await apiClient.bulkSetLabels([{ id: item.id, type: item.type }], labelId);
-      if (result.failureCount > 0) {
-        const errMsg = result.failures.map(f => f.errorMessage).join('; ');
-        console.error('[Governly] bulkSetLabels failed:', errMsg);
-        setStatusMsg({ type: 'error', text: `Failed to apply label: ${errMsg}` });
-      } else {
-        const labelName = labels.find(l => l.id === labelId)?.name;
-        onItemsChange(
-          items.map(i => i.id === item.id ? { ...i, sensitivity: { labelId, labelName } } : i)
-        );
-        setStatusMsg({ type: 'success', text: t('Classifier_Items_LabelUpdated', 'Label updated.') });
+  const stageChange = useCallback((item: FabricItem, labelId: string) => {
+    setPendingChanges(prev => ({ ...prev, [item.id]: labelId }));
+  }, []);
+
+  const discardChanges = useCallback(() => setPendingChanges({}), []);
+
+  const applyChanges = useCallback(async () => {
+    setApplying(true);
+    const entries = Object.entries(pendingChanges);
+
+    // Group item IDs by target label so we can batch per-label
+    const byLabel = new Map<string, string[]>();
+    for (const [itemId, labelId] of entries) {
+      if (!byLabel.has(labelId)) byLabel.set(labelId, []);
+      byLabel.get(labelId)!.push(itemId);
+    }
+
+    const successIds = new Set<string>();
+    const failures: string[] = [];
+
+    for (const [labelId, itemIds] of byLabel) {
+      const batchItems = items
+        .filter(i => itemIds.includes(i.id))
+        .map(i => ({ id: i.id, type: i.type }));
+
+      try {
+        const result = await apiClient.bulkSetLabels(batchItems, labelId);
+        if (result.failureCount > 0) {
+          failures.push(...result.failures.map(f => f.errorMessage));
+        } else {
+          itemIds.forEach(id => successIds.add(id));
+        }
+      } catch (e: any) {
+        failures.push(e?.message ?? 'Unknown error');
       }
-    } catch (e: any) {
-      console.error('[Governly] handleLabelChange threw:', e);
-      setStatusMsg({ type: 'error', text: t('Classifier_Items_LabelError', 'Failed to update label.') });
+    }
+
+    if (successIds.size > 0) {
+      onItemsChange(items.map(i => {
+        if (successIds.has(i.id)) {
+          const labelId = pendingChanges[i.id];
+          const labelName = labels.find(l => l.id === labelId)?.name;
+          return { ...i, sensitivity: { labelId, labelName } };
+        }
+        return i;
+      }));
+      setPendingChanges(prev => {
+        const next = { ...prev };
+        successIds.forEach(id => delete next[id]);
+        return next;
+      });
+    }
+
+    setApplying(false);
+
+    if (failures.length > 0) {
+      setStatusMsg({ type: 'error', text: `Failed to apply ${failures.length} label(s): ${failures.join('; ')}` });
+    } else {
+      setStatusMsg({ type: 'success', text: `Successfully applied ${successIds.size} label change(s).` });
     }
     setTimeout(() => setStatusMsg(null), 8000);
-  }, [apiClient, labels, items, onItemsChange, t]);
+  }, [apiClient, pendingChanges, items, labels, onItemsChange]);
 
   const columns: TableColumnDefinition<FabricItem>[] = useMemo(() => [
     createTableColumn<FabricItem>({
@@ -120,11 +166,21 @@ export const ItemsView: React.FC<ItemsViewProps> = ({
       columnId: 'currentLabel',
       renderHeaderCell: () => t('Classifier_Items_ColCurrentLabel', 'Current Label'),
       renderCell: (item) => (
-        <LabelBadge
-          labelId={item.sensitivity?.labelId}
-          labelName={item.sensitivity?.labelName}
-          labels={labels}
-        />
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <LabelBadge
+            labelId={item.sensitivity?.labelId}
+            labelName={item.sensitivity?.labelName}
+            labels={labels}
+          />
+          {pendingChanges[item.id] && (
+            <Tooltip content="Change staged — click Apply to write to Fabric" relationship="description" withArrow>
+              <span style={{
+                width: 8, height: 8, borderRadius: '50%',
+                backgroundColor: '#f7630c', display: 'inline-block', flexShrink: 0,
+              }} />
+            </Tooltip>
+          )}
+        </span>
       ),
     }),
     createTableColumn<FabricItem>({
@@ -133,13 +189,13 @@ export const ItemsView: React.FC<ItemsViewProps> = ({
       renderCell: (item) => (
         <LabelPicker
           labels={labels}
-          value={item.sensitivity?.labelId}
-          onChange={(labelId) => handleLabelChange(item, labelId)}
+          value={pendingChanges[item.id] ?? item.sensitivity?.labelId}
+          onChange={(labelId) => stageChange(item, labelId)}
           placeholder={t('Classifier_Items_NoLabel', 'No label')}
         />
       ),
     }),
-  ], [t, labels, handleLabelChange]);
+  ], [t, labels, pendingChanges, stageChange]);
 
   if (workspaceError) {
     return (
@@ -193,6 +249,28 @@ export const ItemsView: React.FC<ItemsViewProps> = ({
         <MessageBar intent={statusMsg.type === 'success' ? 'success' : 'error'} style={{ marginBottom: 12 }}>
           <MessageBarBody>{statusMsg.text}</MessageBarBody>
         </MessageBar>
+      )}
+
+      {hasPending && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12,
+          padding: '10px 14px', borderRadius: 6,
+          backgroundColor: '#fff8f0', border: '1px solid #f7630c44',
+        }}>
+          <span style={{ fontSize: 13, color: '#c94f07', flex: 1 }}>
+            <strong>{Object.keys(pendingChanges).length}</strong> label change{Object.keys(pendingChanges).length !== 1 ? 's' : ''} staged — review and apply when ready
+          </span>
+          <Button
+            appearance="primary"
+            disabled={applying}
+            onClick={applyChanges}
+          >
+            {applying ? 'Applying…' : `Apply ${Object.keys(pendingChanges).length} change${Object.keys(pendingChanges).length !== 1 ? 's' : ''}`}
+          </Button>
+          <Button appearance="subtle" disabled={applying} onClick={discardChanges}>
+            Discard
+          </Button>
+        </div>
       )}
 
       {items.length === 0 ? (
