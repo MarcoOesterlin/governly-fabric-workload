@@ -86,16 +86,23 @@ export const ItemsView: React.FC<ItemsViewProps> = ({
 
   const handleLabelChange = useCallback(async (item: FabricItem, labelId: string) => {
     try {
-      await apiClient.bulkSetLabels([{ id: item.id, type: item.type }], labelId);
-      const labelName = labels.find(l => l.id === labelId)?.name;
-      onItemsChange(
-        items.map(i => i.id === item.id ? { ...i, sensitivity: { labelId, labelName } } : i)
-      );
-      setStatusMsg({ type: 'success', text: t('Classifier_Items_LabelUpdated', 'Label updated.') });
-    } catch {
+      const result = await apiClient.bulkSetLabels([{ id: item.id, type: item.type }], labelId);
+      if (result.failureCount > 0) {
+        const errMsg = result.failures.map(f => f.errorMessage).join('; ');
+        console.error('[Governly] bulkSetLabels failed:', errMsg);
+        setStatusMsg({ type: 'error', text: `Failed to apply label: ${errMsg}` });
+      } else {
+        const labelName = labels.find(l => l.id === labelId)?.name;
+        onItemsChange(
+          items.map(i => i.id === item.id ? { ...i, sensitivity: { labelId, labelName } } : i)
+        );
+        setStatusMsg({ type: 'success', text: t('Classifier_Items_LabelUpdated', 'Label updated.') });
+      }
+    } catch (e: any) {
+      console.error('[Governly] handleLabelChange threw:', e);
       setStatusMsg({ type: 'error', text: t('Classifier_Items_LabelError', 'Failed to update label.') });
     }
-    setTimeout(() => setStatusMsg(null), 3000);
+    setTimeout(() => setStatusMsg(null), 8000);
   }, [apiClient, labels, items, onItemsChange, t]);
 
   const columns: TableColumnDefinition<FabricItem>[] = useMemo(() => [
