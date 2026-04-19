@@ -259,7 +259,8 @@ export class GovernlyApiClient {
           method: 'POST',
           body: {
             items: batch,
-            updateDetails: { labelId },
+            labelId,
+            assignmentMethod: 'Standard',
           },
         });
         const failed = res?.failedItems ?? [];
