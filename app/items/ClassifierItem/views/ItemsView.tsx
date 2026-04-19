@@ -17,7 +17,7 @@ import {
 } from '@fluentui/react-components';
 import { useTranslation } from 'react-i18next';
 import { FabricItem, GovernlyApiClient, SensitivityLabel } from '../../../clients/GovernlyApiClient';
-import { LabelPicker } from '../components/LabelPicker';
+import { LabelPicker, REMOVE_LABEL } from '../components/LabelPicker';
 
 interface LabelBadgeProps {
   labelId?: string;
@@ -98,7 +98,7 @@ export const ItemsView: React.FC<ItemsViewProps> = ({
     setApplying(true);
     const entries = Object.entries(pendingChanges);
 
-    // Group item IDs by target label so we can batch per-label
+    // Group item IDs by target label (REMOVE_LABEL = '' means "remove")
     const byLabel = new Map<string, string[]>();
     for (const [itemId, labelId] of entries) {
       if (!byLabel.has(labelId)) byLabel.set(labelId, []);
@@ -114,11 +114,22 @@ export const ItemsView: React.FC<ItemsViewProps> = ({
         .map(i => ({ id: i.id, type: i.type }));
 
       try {
-        const result = await apiClient.bulkSetLabels(batchItems, labelId);
-        if (result.failureCount > 0) {
-          failures.push(...result.failures.map(f => f.errorMessage));
+        if (labelId === REMOVE_LABEL) {
+          // Remove labels from these items
+          const result = await apiClient.bulkRemoveLabels(batchItems);
+          if (result.failureCount > 0) {
+            failures.push(...result.failures.map(f => f.errorMessage));
+          } else {
+            itemIds.forEach(id => successIds.add(id));
+          }
         } else {
-          itemIds.forEach(id => successIds.add(id));
+          // Apply a new label to these items
+          const result = await apiClient.bulkSetLabels(batchItems, labelId);
+          if (result.failureCount > 0) {
+            failures.push(...result.failures.map(f => f.errorMessage));
+          } else {
+            itemIds.forEach(id => successIds.add(id));
+          }
         }
       } catch (e: any) {
         failures.push(e?.message ?? 'Unknown error');
@@ -129,6 +140,9 @@ export const ItemsView: React.FC<ItemsViewProps> = ({
       onItemsChange(items.map(i => {
         if (successIds.has(i.id)) {
           const labelId = pendingChanges[i.id];
+          if (labelId === REMOVE_LABEL) {
+            return { ...i, sensitivity: undefined };
+          }
           const labelName = labels.find(l => l.id === labelId)?.name;
           return { ...i, sensitivity: { labelId, labelName } };
         }
@@ -144,9 +158,9 @@ export const ItemsView: React.FC<ItemsViewProps> = ({
     setApplying(false);
 
     if (failures.length > 0) {
-      setStatusMsg({ type: 'error', text: `Failed to apply ${failures.length} label(s): ${failures.join('; ')}` });
+      setStatusMsg({ type: 'error', text: `Failed to apply ${failures.length} change(s): ${failures.join('; ')}` });
     } else {
-      setStatusMsg({ type: 'success', text: `Successfully applied ${successIds.size} label change(s).` });
+      setStatusMsg({ type: 'success', text: `Successfully applied ${successIds.size} change(s).` });
     }
     setTimeout(() => setStatusMsg(null), 8000);
   }, [apiClient, pendingChanges, items, labels, onItemsChange]);

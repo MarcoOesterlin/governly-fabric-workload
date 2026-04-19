@@ -1,6 +1,10 @@
 import React from 'react';
 import { Combobox, Option, OptionGroup } from '@fluentui/react-components';
+import { DismissCircle16Regular } from '@fluentui/react-icons';
 import { SensitivityLabel } from '../../../clients/GovernlyApiClient';
+
+/** Sentinel value that means "stage this item for label removal". */
+export const REMOVE_LABEL = '';
 
 interface LabelPickerProps {
   labels: SensitivityLabel[];
@@ -31,7 +35,12 @@ export const LabelPicker: React.FC<LabelPickerProps> = ({
   placeholder = 'Select a label…',
 }) => {
   const selectedLabel = labels.find(l => l.id === value);
-  const displayValue = selectedLabel ? selectedLabel.name : '';
+  // value === REMOVE_LABEL ('') means "remove" is staged
+  const displayValue = value === REMOVE_LABEL
+    ? '— Remove label —'
+    : selectedLabel
+      ? selectedLabel.name
+      : '';
 
   // Group labels by parent
   const parentLabels = labels.filter(l => !l.parent);
@@ -69,10 +78,23 @@ export const LabelPicker: React.FC<LabelPickerProps> = ({
       placeholder={placeholder}
       value={displayValue}
       onOptionSelect={(_, data) => {
-        if (data.optionValue) onChange(data.optionValue);
+        if (data.optionValue !== undefined) onChange(data.optionValue);
       }}
       style={{ minWidth: 240 }}
     >
+      {/* Remove label option */}
+      <Option key="__remove__" value={REMOVE_LABEL} text="Remove label">
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#a4262c' }}>
+          <DismissCircle16Regular />
+          <span>Remove label</span>
+        </span>
+      </Option>
+
+      {/* Divider */}
+      <Option key="__divider__" value="__divider__" disabled text="">
+        <span style={{ borderTop: '1px solid #e0e0e0', display: 'block', width: '100%', margin: '2px 0' }} />
+      </Option>
+
       {groupedParents.length > 0 ? (
         <>
           {standaloneLabels.map(renderLabel)}
