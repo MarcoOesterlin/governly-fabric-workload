@@ -6,6 +6,7 @@
 const manifestApi = require('./manifestApi');
 const workloadApi = require('./workloadApi');
 const governlyProxy = require('./governlyProxy');
+const { provisionDataAgent } = require('./dataAgentProvisioner');
 
 /**
  * Register dev server manifest APIs with an Express application
@@ -17,6 +18,22 @@ function registerDevServerApis(app) {
 
   console.log('*** Mounting Workload Backend API Stub ***');
   app.use('/workload', workloadApi);
+
+  // Explicit Express route — prevents middleware URL-matching issues
+  app.post('/api/provision-data-agent', async (req, res) => {
+    const { workspaceId, instanceName } = req.body ?? {};
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'Request body must include "workspaceId".' });
+    }
+    try {
+      const token = governlyProxy.acquireFabricToken();
+      const result = await provisionDataAgent(token, workspaceId, instanceName ?? 'Governly');
+      res.json(result);
+    } catch (err) {
+      console.error('[Provision] Error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   console.log('*** Mounting Governly API Proxy (Fabric/Graph via Azure CLI) ***');
   app.use('/', governlyProxy);

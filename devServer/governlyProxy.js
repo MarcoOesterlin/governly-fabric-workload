@@ -20,7 +20,6 @@ const https = require('https');
 const http = require('http');
 const { DefaultAzureCredential } = require('@azure/identity');
 const { SecretClient } = require('@azure/keyvault-secrets');
-const { provisionDataAgent } = require('./dataAgentProvisioner');
 
 // ── Key Vault: read client secret once at first Graph call ────────────────────
 // DefaultAzureCredential works in both environments with no code changes:
@@ -213,35 +212,6 @@ function parse429WaitMs(body, fallbackMs = 30_000) {
 }
 
 /**
- * POST /api/provision-data-agent
- * Creates a Fabric Notebook with the fabric-data-agent-sdk provisioning script
- * and triggers it to run, which creates a "Governly Data Agent" in the workspace.
- */
-async function handleProvisionRequest(req, res) {
-  const { workspaceId, instanceName } = req.body ?? {};
-
-  if (!workspaceId) {
-    res.statusCode = 400;
-    res.setHeader('Content-Type', 'application/json');
-    return res.end(JSON.stringify({ error: 'Request body must include "workspaceId".' }));
-  }
-
-  try {
-    const token  = acquireAzToken(AZ_TOKEN_RESOURCES.fabric);
-    const result = await provisionDataAgent(token, workspaceId, instanceName ?? 'Governly');
-
-    res.statusCode = 200;
-    res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify(result));
-  } catch (err) {
-    console.error('[Provision] Error:', err.message);
-    res.statusCode = 500;
-    res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({ error: err.message }));
-  }
-}
-
-/**
  * POST /api/proxy
  * Plain middleware (no Express Router) to avoid Express v4/v5 compatibility
  * issues with webpack-dev-server, which bundles its own Express v4.
@@ -332,19 +302,6 @@ function parseJsonBody(req) {
 }
 
 module.exports = async function governlyProxyMiddleware(req, res, next) {
-  if (req.method === 'POST' && req.url === '/api/provision-data-agent') {
-    try {
-      await parseJsonBody(req);
-      await handleProvisionRequest(req, res);
-    } catch (err) {
-      console.error('[Provision] Unhandled error:', err.message);
-      res.statusCode = 500;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ error: err.message }));
-    }
-    return;
-  }
-
   if (req.method !== 'POST' || req.url !== '/api/proxy') return next();
   try {
     await parseJsonBody(req);
@@ -356,3 +313,6 @@ module.exports = async function governlyProxyMiddleware(req, res, next) {
     res.end(JSON.stringify({ error: err.message }));
   }
 };
+
+/** Expose Fabric token acquisition for use by other route registrations. */
+module.exports.acquireFabricToken = () => acquireAzToken(AZ_TOKEN_RESOURCES.fabric);
