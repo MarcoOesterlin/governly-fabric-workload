@@ -69,21 +69,10 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
     setItemsLoading(true);
     setItemsError(undefined);
 
-    const fetchAll = async () => {
-      const all: FabricItem[] = [];
-      let token: string | undefined;
-      do {
-        const page = await apiClient.listItems({ workspaceId, continuationToken: token });
-        all.push(...page.items);
-        token = page.continuationToken;
-      } while (token);
-      return all;
-    };
-
-    fetchAll()
+    apiClient.listWorkspaceItems(workspaceId)
       .then(async fetched => {
         if (cancelled) return;
-        console.log('[Governly] listItems returned', fetched.length, 'items');
+        console.log('[Governly] listWorkspaceItems returned', fetched.length, 'items');
         // Show items immediately, then enrich with sensitivity labels in background
         setItems(fetched);
         const enriched = await apiClient.enrichWithSensitivityLabels(fetched);
@@ -95,7 +84,7 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
       })
       .catch((err: any) => {
         if (cancelled) return;
-        console.error('[Governly] listItems failed:', err);
+        console.error('[Governly] listWorkspaceItems failed:', err);
         setItemsError(err?.message ?? (typeof err === 'object' ? JSON.stringify(err) : String(err)));
         setItemsLoading(false);
       });

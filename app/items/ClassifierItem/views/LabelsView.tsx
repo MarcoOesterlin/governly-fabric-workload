@@ -44,7 +44,12 @@ export const LabelsView: React.FC<LabelsViewProps> = ({ apiClient }) => {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    apiClient.listSensitivityLabels().catch((): SensitivityLabel[] => []).then(l => {
+    apiClient.listSensitivityLabels()
+      .catch((err): SensitivityLabel[] => {
+        console.warn('[Governly] listSensitivityLabels failed:', err);
+        return [];
+      })
+      .then(l => {
       if (cancelled) return;
       setLabels(l);
       setLoading(false);

@@ -55,6 +55,13 @@ export class FabricAuthenticationService {
     });
   }
 
+  /** @deprecated No-op — consent is handled by the Fabric host during acquireFrontendAccessToken. */
+  async triggerConsent(_scopes: string[]): Promise<void> {
+    // Calling acquireAccessToken({ additionalScopesToConsent }) causes "Empty iframeId" errors in
+    // the Fabric SDK before the iframe channel is ready. Skip it — the real auth call surfaces
+    // the correct error code (WorkloadConfigError / ScopesError) if consent is missing.
+  }
+
   /**
    * Acquire service principal token using client credentials flow
    * @param config Service principal configuration

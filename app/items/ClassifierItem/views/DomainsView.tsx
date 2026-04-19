@@ -39,7 +39,10 @@ export const DomainsView: React.FC<DomainsViewProps> = ({ apiClient, onLabelUpda
     setLoading(true);
     Promise.all([
       apiClient.listDomains().catch((): Domain[] => []),
-      apiClient.listSensitivityLabels().catch((): SensitivityLabel[] => []),
+      apiClient.listSensitivityLabels().catch((err): SensitivityLabel[] => {
+        console.warn('[Governly] listSensitivityLabels failed:', err);
+        return [];
+      }),
     ]).then(([d, l]) => {
       if (cancelled) return;
       setDomains(d);

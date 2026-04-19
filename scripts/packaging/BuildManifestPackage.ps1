@@ -112,11 +112,11 @@ try {
 
   # --- BE/ manifest files ---
   Add-TextEntry $zip "BE/WorkloadManifest.xml" (Expand-Template (Join-Path $manifestDir "WorkloadManifest.xml"))
-  Add-TextEntry $zip "BE/Classifier.xml"       (Expand-Template (Join-Path $manifestDir "Classifier.xml"))
+  Add-TextEntry $zip "BE/Instance.xml"         (Expand-Template (Join-Path $manifestDir "Instance.xml"))
 
   # --- FE/ files (product.json lowercase, matching official WDK nuspec target) ---
   Add-TextEntry $zip "FE/product.json" (Get-Content (Join-Path $manifestDir "FE\Product.json") -Raw -Encoding UTF8)
-  Add-TextEntry $zip "FE/Classifier.json" (Get-Content (Join-Path $manifestDir "FE\Classifier.json") -Raw -Encoding UTF8)
+  Add-TextEntry $zip "FE/Instance.json" (Get-Content (Join-Path $manifestDir "FE\Instance.json") -Raw -Encoding UTF8)
 
   # --- FE/assets/ ---
   $feAssetsDir = Join-Path $manifestDir "FE\assets"

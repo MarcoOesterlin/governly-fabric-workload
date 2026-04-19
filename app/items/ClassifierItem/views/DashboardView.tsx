@@ -75,7 +75,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ apiClient, onNavig
     Promise.all([
       apiClient.listDomains().catch((): Domain[] => []),
       apiClient.listItems().catch((): FabricItemsPage => ({ items: [] })),
-      apiClient.listSensitivityLabels().catch((): SensitivityLabel[] => []),
+      apiClient.listSensitivityLabels().catch((err): SensitivityLabel[] => {
+        console.warn('[Governly] listSensitivityLabels failed:', err);
+        return [];
+      }),
     ]).then(([domains, itemsPage, labels]) => {
       if (cancelled) return;
       const items = itemsPage.items || [];

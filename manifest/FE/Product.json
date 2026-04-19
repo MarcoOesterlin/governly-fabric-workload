@@ -18,7 +18,7 @@
             "link": "https://github.com/MarcoOesterlin/governly-fabric-workload"
         }
     ],
-        "recommendedItemTypes": ["Classifier"]
+        "recommendedItemTypes": ["Instance"]
     },
     "createExperience": {
         "description": "Bulk-apply sensitivity labels to Fabric items",
@@ -41,7 +41,7 @@
                     "create-hub",
                     "workspace-plus-new"
                 ],
-                "itemType": "Classifier"
+                "itemType": "Instance"
             }
         ]
     },
