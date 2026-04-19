@@ -128,6 +128,9 @@ export class GovernlyApiClient {
           type: i.type,
           displayName: i.displayName,
           workspaceId: i.workspaceId ?? workspaceId,
+          sensitivity: i.sensitivityLabel?.sensitivityLabelId
+            ? { labelId: i.sensitivityLabel.sensitivityLabelId.toLowerCase() }
+            : undefined,
         });
       }
       // Extract path portion from continuationUri for the next proxy call
