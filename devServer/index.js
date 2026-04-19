@@ -5,6 +5,7 @@
 
 const manifestApi = require('./manifestApi');
 const workloadApi = require('./workloadApi');
+const governlyProxy = require('./governlyProxy');
 
 /**
  * Register dev server manifest APIs with an Express application
@@ -16,6 +17,9 @@ function registerDevServerApis(app) {
 
   console.log('*** Mounting Workload Backend API Stub ***');
   app.use('/workload', workloadApi);
+
+  console.log('*** Mounting Governly API Proxy (Fabric/Graph via Azure CLI) ***');
+  app.use('/', governlyProxy);
 }
 
 function registerDevServerComponents() {

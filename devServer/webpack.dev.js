@@ -33,6 +33,7 @@ module.exports = merge(baseConfig, {
             "process.env.DEV_AAD_CONFIG_FE_APPID": JSON.stringify(process.env.DEV_AAD_CONFIG_FE_APPID),
             "process.env.DEV_AAD_CONFIG_BE_APPID": JSON.stringify(process.env.DEV_AAD_CONFIG_BE_APPID),
             "process.env.DEV_AAD_CONFIG_BE_AUDIENCE": JSON.stringify(process.env.DEV_AAD_CONFIG_BE_AUDIENCE),
+            "process.env.WORKSPACE_GUID": JSON.stringify(process.env.WORKSPACE_GUID),
         }),
     ],
     devServer: {

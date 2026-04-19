@@ -15,14 +15,11 @@
  * Body: { api: 'fabric'|'graph'|'powerbi', method, path, body?, accessToken? }
  */
 
-const express = require('express');
 const { execSync } = require('child_process');
 const https = require('https');
 const http = require('http');
 const { DefaultAzureCredential } = require('@azure/identity');
 const { SecretClient } = require('@azure/keyvault-secrets');
-
-const router = express.Router();
 
 // ── Key Vault: read client secret once at first Graph call ────────────────────
 // DefaultAzureCredential works in both environments with no code changes:
@@ -216,22 +213,21 @@ function parse429WaitMs(body, fallbackMs = 30_000) {
 
 /**
  * POST /api/proxy
- * Generic proxy that forwards requests to Fabric, Graph, or PowerBI APIs.
- *
- * For Graph: the proxy acquires an app-only token via client credentials using
- * the client secret stored in Azure Key Vault. No user token required.
- * Fabric/PowerBI tokens still use Azure CLI (already signed in).
+ * Plain middleware (no Express Router) to avoid Express v4/v5 compatibility
+ * issues with webpack-dev-server, which bundles its own Express v4.
  */
-router.post('/api/proxy', express.json(), async (req, res) => {
+async function handleProxyRequest(req, res) {
   const { api, method = 'GET', path, body } = req.body ?? {};
 
   if (!api || !path) {
-    return res.status(400).json({ error: 'Request body must include "api" and "path".' });
+    res.statusCode = 400;
+    res.setHeader('Content-Type', 'application/json');
+    return res.end(JSON.stringify({ error: 'Request body must include "api" and "path".' }));
   }
   if (!API_BASES[api]) {
-    return res.status(400).json({
-      error: `Unknown api "${api}". Must be one of: fabric, graph, powerbi.`,
-    });
+    res.statusCode = 400;
+    res.setHeader('Content-Type', 'application/json');
+    return res.end(JSON.stringify({ error: `Unknown api "${api}". Must be one of: fabric, graph, powerbi.` }));
   }
 
   try {
@@ -271,14 +267,49 @@ router.post('/api/proxy', express.json(), async (req, res) => {
     } else {
       console.log(`[Proxy] ← ${result.status} ${url}`);
     }
-    res
-      .status(result.status)
-      .set('Content-Type', result.contentType)
-      .send(result.body);
+    res.statusCode = result.status;
+    res.setHeader('Content-Type', result.contentType);
+    res.end(result.body);
   } catch (err) {
     console.error('[Proxy] Error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.statusCode = 500;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ error: err.message }));
   }
-});
+}
 
-module.exports = router;
+/**
+ * Body parser for JSON — reads and parses the raw request body.
+ * Avoids dependency on any Express version's body-parser.
+ */
+function parseJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    if (req.body !== undefined) { resolve(); return; }
+    const contentType = req.headers['content-type'] || '';
+    if (!contentType.includes('application/json')) { resolve(); return; }
+    const chunks = [];
+    req.on('data', c => chunks.push(c));
+    req.on('end', () => {
+      try {
+        req.body = JSON.parse(Buffer.concat(chunks).toString());
+        resolve();
+      } catch (e) {
+        reject(e);
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+module.exports = async function governlyProxyMiddleware(req, res, next) {
+  if (req.method !== 'POST' || req.url !== '/api/proxy') return next();
+  try {
+    await parseJsonBody(req);
+    await handleProxyRequest(req, res);
+  } catch (err) {
+    console.error('[Proxy] Unhandled error:', err.message);
+    res.statusCode = 500;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ error: err.message }));
+  }
+};
