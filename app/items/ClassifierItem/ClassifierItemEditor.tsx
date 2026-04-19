@@ -7,6 +7,7 @@ import {
   ShieldTask24Regular,
   AppsList24Regular,
   Tag24Regular,
+  Open24Regular,
 } from '@fluentui/react-icons';
 
 import { GovernlyApiClient, FabricItem, SensitivityLabel } from '../../clients/GovernlyApiClient';
@@ -174,6 +175,27 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
       }}>
         <ShieldTask24Regular style={{ flexShrink: 0 }} />
         <span style={{ fontWeight: 600, fontSize: 16, letterSpacing: 0.2, flex: 1 }}>Governly</span>
+        {workspaceId && (
+          <button
+            onClick={() => window.open(`https://app.fabric.microsoft.com/groups/${workspaceId}`, '_blank')}
+            title="Open workspace in Fabric"
+            style={{
+              background: 'rgba(255,255,255,0.15)',
+              border: 'none',
+              borderRadius: 4,
+              color: '#fff',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '4px 10px',
+              fontSize: 13,
+            }}
+          >
+            <Open24Regular style={{ width: 16, height: 16 }} />
+            Open Workspace
+          </button>
+        )}
         <button
           onClick={handleRefresh}
           title={t('Classifier_Ribbon_Refresh', 'Refresh')}
