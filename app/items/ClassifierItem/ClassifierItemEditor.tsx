@@ -177,9 +177,16 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
         <span style={{ fontWeight: 600, fontSize: 16, letterSpacing: 0.2, flex: 1 }}>Governly</span>
         {workspaceId && (
           <button
-            onClick={() => workloadClient.navigation.openBrowserTab({
-              url: `https://app.fabric.microsoft.com/groups/${workspaceId}`,
-            })}
+            onClick={() => {
+              workloadClient.navigation.navigate('host', {
+                path: `/groups/${workspaceId}`,
+              }).catch(() => {
+                // fallback: open in new browser tab
+                workloadClient.navigation.openBrowserTab({
+                  url: `https://app.fabric.microsoft.com/groups/${workspaceId}`,
+                }).catch(console.error);
+              });
+            }}
             title="Open workspace in Fabric"
             style={{
               background: 'rgba(255,255,255,0.15)',
