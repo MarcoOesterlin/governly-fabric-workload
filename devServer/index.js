@@ -20,6 +20,44 @@ function registerDevServerApis(app) {
   console.log('*** Mounting Workload Backend API Stub ***');
   app.use('/workload', workloadApi);
 
+  // Check if Data Agent already exists
+  app.get('/api/data-agent-status', async (req, res) => {
+    const workspaceId = req.query.workspaceId;
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'Query param "workspaceId" is required.' });
+    }
+    try {
+      const token = governlyProxy.acquireFabricToken();
+      const resp = await require('https').get(
+        `https://api.fabric.microsoft.com/v1/workspaces/${workspaceId}/dataAgents`,
+        { headers: { Authorization: `Bearer ${token}` } },
+        (httpRes) => {
+          const chunks = [];
+          httpRes.on('data', c => chunks.push(c));
+          httpRes.on('end', () => {
+            const body = Buffer.concat(chunks).toString();
+            if (httpRes.statusCode < 200 || httpRes.statusCode >= 300) {
+              return res.json({ exists: false });
+            }
+            try {
+              const agents = JSON.parse(body).value ?? [];
+              const agent = agents.find(a => a.displayName === 'Governly Data Agent');
+              if (agent) {
+                res.json({ exists: true, agentId: agent.id, agentName: agent.displayName });
+              } else {
+                res.json({ exists: false });
+              }
+            } catch { res.json({ exists: false }); }
+          });
+        }
+      );
+      resp.on('error', () => res.json({ exists: false }));
+    } catch (err) {
+      console.error('[DataAgentStatus] Error:', err.message);
+      res.json({ exists: false });
+    }
+  });
+
   // Explicit Express route — prevents middleware URL-matching issues
   app.post('/api/provision-data-agent', async (req, res) => {
     const { workspaceId, instanceName } = req.body ?? {};

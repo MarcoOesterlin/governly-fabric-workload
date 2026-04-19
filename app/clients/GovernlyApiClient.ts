@@ -68,6 +68,12 @@ export interface DataAgentProvisionResult {
   message: string;
 }
 
+export interface DataAgentStatus {
+  exists: boolean;
+  agentId?: string;
+  agentName?: string;
+}
+
 export interface LabelSuggestion {
   itemId: string;
   suggestedLabelId: string;
@@ -355,6 +361,17 @@ export class GovernlyApiClient {
     } else {
       await this.bulkRemoveLabels(allItems);
     }
+  }
+
+  /**
+   * Check if a Governly Data Agent already exists in the workspace.
+   */
+  async checkDataAgent(workspaceId: string): Promise<DataAgentStatus> {
+    const response = await fetch(`/api/data-agent-status?workspaceId=${encodeURIComponent(workspaceId)}`);
+    if (!response.ok) {
+      return { exists: false };
+    }
+    return response.json() as Promise<DataAgentStatus>;
   }
 
   /**

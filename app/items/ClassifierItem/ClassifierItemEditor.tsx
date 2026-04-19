@@ -6,7 +6,7 @@ import {
   ArrowClockwise24Regular,
   ShieldTask24Regular,
   AppsList24Regular,
-  Tag24Regular,
+  CheckmarkStarburst24Regular,
   Open24Regular,
   Bot24Regular,
 } from '@fluentui/react-icons';
@@ -14,13 +14,13 @@ import {
 import { GovernlyApiClient, FabricItem, SensitivityLabel, DataAgentProvisionResult } from '../../clients/GovernlyApiClient';
 import { callGetItem } from '../../controller/ItemCRUDController';
 import { ItemsView } from './views/ItemsView';
-import { LabelsView } from './views/LabelsView';
+import { DataQualityView } from './views/DataQualityView';
 
 interface ClassifierItemEditorProps {
   workloadClient: WorkloadClientAPI;
 }
 
-type ViewKey = 'items' | 'labels';
+type ViewKey = 'items' | 'data-quality';
 
 interface NavItem {
   key: ViewKey;
@@ -30,8 +30,8 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { key: 'items',  labelKey: 'Nav_Items',  defaultLabel: 'Workspace Items', icon: <AppsList24Regular /> },
-  { key: 'labels', labelKey: 'Nav_Labels', defaultLabel: 'Labels',          icon: <Tag24Regular /> },
+  { key: 'items',        labelKey: 'Nav_Items',        defaultLabel: 'Workspace Items', icon: <AppsList24Regular /> },
+  { key: 'data-quality', labelKey: 'Nav_DataQuality',  defaultLabel: 'Data Quality',    icon: <CheckmarkStarburst24Regular /> },
 ];
 
 const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadClient }) => {
@@ -52,9 +52,32 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
   const [itemsLoading, setItemsLoading] = useState(false);
   const [itemsError, setItemsError] = useState<string | undefined>();
 
-  const [dataAgentStatus, setDataAgentStatus] = useState<'idle' | 'provisioning' | 'done' | 'error'>('idle');
+  const [dataAgentStatus, setDataAgentStatus] = useState<'checking' | 'idle' | 'provisioning' | 'done' | 'error'>('checking');
   const [dataAgentResult, setDataAgentResult] = useState<DataAgentProvisionResult | undefined>();
   const [dataAgentError, setDataAgentError] = useState<string | undefined>();
+
+  // Auto-check if Data Agent exists when workspace loads
+  useEffect(() => {
+    if (!workspaceId) return;
+    setDataAgentStatus('checking');
+    apiClient.checkDataAgent(workspaceId)
+      .then(status => {
+        if (status.exists) {
+          console.log('[Governly] Data Agent already exists:', status.agentId);
+          setDataAgentResult({
+            agentId: status.agentId,
+            agentName: status.agentName,
+            message: `${status.agentName ?? 'Data Agent'} is active`,
+          });
+          setDataAgentStatus('done');
+        } else {
+          setDataAgentStatus('idle');
+        }
+      })
+      .catch(() => {
+        setDataAgentStatus('idle');
+      });
+  }, [apiClient, workspaceId]);
 
   useEffect(() => {
     apiClient.listSensitivityLabels()
@@ -176,8 +199,8 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
             onItemsChange={setItems}
           />
         );
-      case 'labels':
-        return <LabelsView apiClient={apiClient} />;
+      case 'data-quality':
+        return <DataQualityView />;
       default:
         return null;
     }
@@ -202,31 +225,34 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
         {workspaceId && (
           <button
             onClick={handleProvisionDataAgent}
-            disabled={dataAgentStatus === 'provisioning'}
+            disabled={dataAgentStatus === 'provisioning' || dataAgentStatus === 'checking' || dataAgentStatus === 'done'}
             title={
-              dataAgentStatus === 'provisioning' ? 'Creating Data Agent notebook...' :
-              dataAgentStatus === 'done'          ? `${dataAgentResult?.message ?? 'Data Agent provisioned'} — click to re-run` :
-              dataAgentStatus === 'error'         ? `Error: ${dataAgentError} — click to retry` :
-              'Create a Fabric Data Agent for this workspace using fabric-data-agent-sdk'
+              dataAgentStatus === 'checking'      ? 'Checking Data Agent status...' :
+              dataAgentStatus === 'provisioning'  ? 'Creating Data Agent...' :
+              dataAgentStatus === 'done'           ? `${dataAgentResult?.agentName ?? 'Data Agent'} is active` :
+              dataAgentStatus === 'error'          ? `Error: ${dataAgentError} — click to retry` :
+              'Create a Fabric Data Agent for this workspace'
             }
             style={{
-              background: dataAgentStatus === 'done'  ? 'rgba(100,200,100,0.25)' :
-                          dataAgentStatus === 'error' ? 'rgba(255,80,80,0.25)'  :
+              background: dataAgentStatus === 'done'     ? 'rgba(100,200,100,0.25)' :
+                          dataAgentStatus === 'error'    ? 'rgba(255,80,80,0.25)'  :
+                          dataAgentStatus === 'checking' ? 'rgba(255,255,255,0.10)' :
                           'rgba(255,255,255,0.15)',
               border: 'none',
               borderRadius: 4,
               color: '#fff',
-              cursor: dataAgentStatus === 'provisioning' ? 'default' : 'pointer',
+              cursor: (dataAgentStatus === 'provisioning' || dataAgentStatus === 'checking' || dataAgentStatus === 'done') ? 'default' : 'pointer',
               display: 'flex',
               alignItems: 'center',
               gap: 6,
               padding: '4px 10px',
               fontSize: 13,
-              opacity: dataAgentStatus === 'provisioning' ? 0.7 : 1,
+              opacity: (dataAgentStatus === 'provisioning' || dataAgentStatus === 'checking') ? 0.7 : 1,
             }}
           >
             <Bot24Regular style={{ width: 16, height: 16 }} />
-            {dataAgentStatus === 'provisioning' ? 'Creating…' :
+            {dataAgentStatus === 'checking'     ? 'Checking…' :
+             dataAgentStatus === 'provisioning' ? 'Creating…' :
              dataAgentStatus === 'done'         ? 'Data Agent ✓' :
              dataAgentStatus === 'error'        ? 'Data Agent ✗' :
              'Create Data Agent'}
@@ -284,41 +310,35 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
       </div>
 
       {/* ── Data Agent notification banner ── */}
-      {(dataAgentStatus === 'done' || dataAgentStatus === 'error') && (
-        <div style={{
-          backgroundColor: dataAgentStatus === 'done' ? '#dff6dd' : '#fde7e9',
-          color:           dataAgentStatus === 'done' ? '#1a7237' : '#a4262c',
-          padding: '8px 16px',
-          fontSize: 13,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          flexShrink: 0,
-        }}>
-          {dataAgentStatus === 'done' ? (
-            <>
-              <span>✅ {dataAgentResult?.message}</span>
-              {dataAgentResult?.notebookId && workspaceId && (
-                <button
-                  onClick={() => {
-                    const url = `https://app.fabric.microsoft.com/groups/${workspaceId}/synapsenotebooks/${dataAgentResult.notebookId}`;
-                    workloadClient.navigation.openBrowserTab({ url }).catch(console.error);
-                  }}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontWeight: 600, padding: 0, textDecoration: 'underline' }}
-                >
-                  Open notebook →
-                </button>
-              )}
-            </>
-          ) : (
-            <span>❌ Data Agent provisioning failed: {dataAgentError}</span>
-          )}
-          <button
-            onClick={() => setDataAgentStatus('idle')}
-            style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: 16 }}
-          >×</button>
-        </div>
-      )}
+      {(dataAgentStatus === 'done' || dataAgentStatus === 'error') && (() => {
+        const hasAgent  = !!dataAgentResult?.agentId;
+        const isSuccess = dataAgentStatus === 'done';
+        const bgColor   = isSuccess ? '#dff6dd' : '#fde7e9';
+        const textColor = isSuccess ? '#1a7237' : '#a4262c';
+        const icon      = isSuccess ? '✅' : '❌';
+        const openAgent = async () => {
+          const wsPath = `/groups/${workspaceId}`;
+          try {
+            // Navigate home first so Fabric reloads the workspace items list on return
+            await workloadClient.navigation.navigate('host', { path: '/' });
+            await new Promise(r => setTimeout(r, 300));
+            await workloadClient.navigation.navigate('host', { path: wsPath });
+          } catch {
+            workloadClient.navigation.navigate('host', { path: wsPath }).catch(console.error);
+          }
+        };
+        return (
+          <div style={{ backgroundColor: bgColor, color: textColor, padding: '8px 16px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+            <span>{icon} {isSuccess ? dataAgentResult?.message : `Data Agent provisioning failed: ${dataAgentError}`}</span>
+            {isSuccess && hasAgent && workspaceId && (
+              <button onClick={openAgent} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontWeight: 600, padding: 0, textDecoration: 'underline' }}>
+                Open Workspace →
+              </button>
+            )}
+            <button onClick={() => setDataAgentStatus('idle')} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: 16 }}>×</button>
+          </div>
+        );
+      })()}
 
       {/* ── Body (sidebar + content) ── */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
