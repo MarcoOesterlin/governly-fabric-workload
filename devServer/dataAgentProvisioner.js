@@ -239,70 +239,73 @@ async function provisionDataAgent(token, workspaceId, instanceName) {
 
   console.log(`[DataAgent] Provisioning for workspace ${workspaceId}, instance "${instanceName}"`);
 
-  // Build notebook content (Fabric .py format)
-  const notebookPy      = buildNotebookPy(agentName);
-  const encodedNotebook = Buffer.from(notebookPy).toString('base64');
+  // ── Check if a provisioner notebook already exists ────────────────────────
+  const listResp = await httpRequest(
+    `${FABRIC_API}/workspaces/${workspaceId}/items?type=Notebook`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!listResp.ok) throw new Error(`Failed to list workspace notebooks (${listResp.status})`);
+  const existingNotebooks = JSON.parse(listResp.body).value ?? [];
 
-  const platformContent = JSON.stringify({
-    $schema: 'https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json',
-    metadata: { type: 'Notebook', displayName: notebookName },
-    config:   { version: '2.0', logicalId: '00000000-0000-0000-0000-000000000000' },
-  });
-  const encodedPlatform = Buffer.from(platformContent).toString('base64');
-
-  // ── Create the notebook item (or reuse if it already exists) ─────────────
-  const createBody = JSON.stringify({
-    displayName: notebookName,
-    type: 'Notebook',
-    definition: {
-      parts: [
-        { path: 'notebook-content.py', payload: encodedNotebook, payloadType: 'InlineBase64' },
-        { path: '.platform',           payload: encodedPlatform, payloadType: 'InlineBase64' },
-      ],
-    },
-  });
-
-  const authHeaders = {
-    Authorization:  `Bearer ${token}`,
-    'Content-Type': 'application/json',
-    'Content-Length': String(Buffer.byteLength(createBody)),
-  };
-
-  console.log(`[DataAgent] Creating notebook "${notebookName}"...`);
-  const createResp = await httpRequest(
-    `${FABRIC_API}/workspaces/${workspaceId}/items`,
-    { method: 'POST', headers: authHeaders, body: createBody }
+  // Match on current name or any legacy name variant (contains "Agent Provisioner")
+  const existingNotebook = existingNotebooks.find(
+    i => i.displayName === notebookName || i.displayName.includes('Agent Provisioner')
   );
 
   let notebookId;
 
-  if (createResp.status === 201) {
-    notebookId = JSON.parse(createResp.body).id;
-  } else if (createResp.status === 202) {
-    const location = createResp.headers['location'] || createResp.headers['Location'] || '';
-    const opMatch  = location.match(/\/operations\/([^/?]+)/i);
-    if (!opMatch) throw new Error(`Unexpected Location header: ${location}`);
-
-    const operationId = opMatch[1];
-    console.log(`[DataAgent] Polling operation ${operationId}...`);
-    await pollOperation(token, operationId);
-    const result = await getOperationResult(token, operationId);
-    notebookId = result.id;
-  } else if (createResp.status === 409) {
-    // Notebook already exists — find its ID from the workspace items list
-    console.log(`[DataAgent] Notebook already exists, looking up existing ID...`);
-    const listResp = await httpRequest(
-      `${FABRIC_API}/workspaces/${workspaceId}/items?type=Notebook`,
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-    if (!listResp.ok) throw new Error(`Failed to list workspace items (${listResp.status})`);
-    const items = JSON.parse(listResp.body).value ?? [];
-    const existing = items.find(i => i.displayName === notebookName);
-    if (!existing) throw new Error(`Notebook conflict but could not find existing notebook by name "${notebookName}"`);
-    notebookId = existing.id;
-    console.log(`[DataAgent] Reusing existing notebook: ${notebookId}`);
+  if (existingNotebook) {
+    notebookId = existingNotebook.id;
+    console.log(`[DataAgent] Reusing existing notebook "${existingNotebook.displayName}": ${notebookId}`);
   } else {
-    throw new Error(`Failed to create notebook (${createResp.status}): ${createResp.body.slice(0, 400)}`);
+    // Build notebook content (Fabric .py format)
+    const notebookPy      = buildNotebookPy(agentName);
+    const encodedNotebook = Buffer.from(notebookPy).toString('base64');
+
+    const platformContent = JSON.stringify({
+      $schema: 'https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json',
+      metadata: { type: 'Notebook', displayName: notebookName },
+      config:   { version: '2.0', logicalId: '00000000-0000-0000-0000-000000000000' },
+    });
+    const encodedPlatform = Buffer.from(platformContent).toString('base64');
+
+    const createBody = JSON.stringify({
+      displayName: notebookName,
+      type: 'Notebook',
+      definition: {
+        parts: [
+          { path: 'notebook-content.py', payload: encodedNotebook, payloadType: 'InlineBase64' },
+          { path: '.platform',           payload: encodedPlatform, payloadType: 'InlineBase64' },
+        ],
+      },
+    });
+
+    const authHeaders = {
+      Authorization:  `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'Content-Length': String(Buffer.byteLength(createBody)),
+    };
+
+    console.log(`[DataAgent] Creating notebook "${notebookName}"...`);
+    const createResp = await httpRequest(
+      `${FABRIC_API}/workspaces/${workspaceId}/items`,
+      { method: 'POST', headers: authHeaders, body: createBody }
+    );
+
+    if (createResp.status === 201) {
+      notebookId = JSON.parse(createResp.body).id;
+    } else if (createResp.status === 202) {
+      const location = createResp.headers['location'] || createResp.headers['Location'] || '';
+      const opMatch  = location.match(/\/operations\/([^/?]+)/i);
+      if (!opMatch) throw new Error(`Unexpected Location header: ${location}`);
+      const operationId = opMatch[1];
+      console.log(`[DataAgent] Polling operation ${operationId}...`);
+      await pollOperation(token, operationId);
+      const result = await getOperationResult(token, operationId);
+      notebookId = result.id;
+    } else {
+      throw new Error(`Failed to create notebook (${createResp.status}): ${createResp.body.slice(0, 400)}`);
+    }
   }
 
   console.log(`[DataAgent] Notebook created: ${notebookId}`);
