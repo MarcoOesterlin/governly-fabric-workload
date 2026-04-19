@@ -7,6 +7,7 @@
 
 const https = require('https');
 const crypto = require('crypto');
+const { fetchLakehouseTables, getOneLakeToken } = require('./dataAgentProvisioner');
 
 const FABRIC_API = 'https://api.fabric.microsoft.com/v1';
 const AGENT_NAME = 'Governly Data Agent';
@@ -89,87 +90,89 @@ function assistantRequest(baseUrl, path, token, body, method) {
   return httpRequest(url, opts);
 }
 
+// ── Pre-fetch table schemas for all lakehouses ────────────────────────────────
+
+async function fetchAllTableSchemas(token, workspaceId, items) {
+  const lakehouses = items.filter(i => i.type === 'Lakehouse');
+  const schemaMap = {}; // { itemId: [{ name, schema }] }
+
+  for (const lh of lakehouses) {
+    try {
+      const tables = await fetchLakehouseTables(token, workspaceId, lh.id);
+      schemaMap[lh.id] = tables;
+      console.log(`[LabelSuggester] ${lh.displayName}: ${tables.length} table(s) — ${tables.map(t => `${t.schema}.${t.name}`).join(', ')}`);
+    } catch (e) {
+      console.warn(`[LabelSuggester] Failed to fetch tables for ${lh.displayName}: ${e.message}`);
+      schemaMap[lh.id] = [];
+    }
+  }
+  return schemaMap;
+}
+
 // ── Build the structured prompt ───────────────────────────────────────────────
 
-function buildPrompt(items, labels) {
+function buildPrompt(items, labels, tableSchemas) {
   const sorted = [...labels].sort((a, b) => (a.sensitivity ?? 0) - (b.sensitivity ?? 0));
   const labelLines = sorted
     .map(l => `  - "${l.name}" (id: ${l.id}) [sensitivity rank: ${l.sensitivity ?? 0}]${l.description ? ' — ' + l.description : ''}`)
     .join('\n');
 
-  const itemLines = items
-    .map(i => `  - "${i.displayName}" (type: ${i.type}, id: ${i.id})`)
-    .join('\n');
-
-  // Build dynamic label references by position
   const lowest = sorted[0];
   const highest = sorted[sorted.length - 1];
   const secondHighest = sorted.length >= 3 ? sorted[sorted.length - 2] : highest;
   const midLevel = sorted.length >= 4 ? sorted[1] : lowest;
 
-  return `You are a data classification engine. You MUST classify each workspace item by querying its actual data.
+  // Build item lines with embedded table info for lakehouses
+  const itemLines = items.map(i => {
+    let line = `  - "${i.displayName}" (type: ${i.type}, id: ${i.id})`;
+    const tables = tableSchemas[i.id];
+    if (tables && tables.length > 0) {
+      const tableList = tables.map(t => `${t.schema}.${t.name}`).join(', ');
+      line += `\n    TABLES: [${tableList}]`;
+    }
+    return line;
+  }).join('\n');
 
-WORKSPACE ITEMS TO CLASSIFY:
+  return `You are a data classification engine. I have already inspected the data sources and listed their table names below. Do NOT attempt to query any data sources yourself. Classify based ONLY on the table names provided.
+
+WORKSPACE ITEMS (table names pre-fetched from each lakehouse):
 ${itemLines}
 
-AVAILABLE SENSITIVITY LABELS (lowest → highest sensitivity):
+SENSITIVITY LABELS (lowest → highest):
 ${labelLines}
 
-═══════════════════════════════════════════
-STEP 1: QUERY EVERY DATA SOURCE
-═══════════════════════════════════════════
-For each Lakehouse/Warehouse/SQLEndpoint, list all available tables across ALL schemas (not just dbo), then run:
-  SELECT TOP 5 * FROM <schema>.<table>
-on each table. Record the column names and sample values you see.
-
-═══════════════════════════════════════════
-STEP 2: CLASSIFY USING THESE RULES
-═══════════════════════════════════════════
-Apply rules in order. Use the FIRST rule that matches:
+CLASSIFICATION RULES — apply the FIRST matching rule per item:
 
 RULE A → "${highest.name}" (${highest.id})
-  Columns or values contain direct personal identifiers:
-  full names, email addresses, phone numbers, SSNs, passport numbers,
-  physical home addresses, dates of birth, medical/health records,
-  biometric data, passwords, credit card or bank account numbers.
+  ANY table name contains keywords suggesting personal/identifiable data:
+  customer, employee, person, user, patient, member, contact, account, beneficiary,
+  or prefixes like dim_customer, dimension_employee, fact_customer, etc.
+  PII includes names, addresses, emails, phone numbers, dates of birth, IDs.
 
 RULE B → "${secondHighest.name}" (${secondHighest.id})
-  Columns or values contain trackable/sensitive operational data:
-  • GPS coordinates, latitude/longitude (e.g. pickup_latitude, dropoff_longitude)
-  • Detailed financial transactions per record (fare_amount, tip_amount, total_amount, payment_type)
-  • Trip/journey records with timestamps + locations (these can re-identify individuals)
-  • Salary, invoice, or revenue data at individual-record level
-  • Customer IDs combined with behavioral data
+  ANY table name contains keywords suggesting financial transactions or location tracking:
+  sale, transaction, payment, invoice, order, revenue, billing, fare, trip, ride,
+  tripdata, journey, route, GPS, coordinates, pickup, dropoff.
 
 RULE C → "${midLevel.name}" (${midLevel.id})
-  Data is internal operational without personal or financial detail:
-  aggregated metrics, pipeline configs, system logs, internal reference mappings,
-  non-sensitive metadata, operational schedules.
+  Tables contain only internal reference or operational data — no personal or financial info:
+  dimension_date, dimension_city, stock_item, inventory, config, log, metric, audit,
+  calendar, geography, product_category, warehouse.
 
 RULE D → "${lowest.name}" (${lowest.id})
-  Data is entirely public and non-sensitive:
-  public holiday calendars, country/region codes, currency lists,
-  publicly available government statistics, open reference datasets.
+  Tables contain only publicly available reference data:
+  public, holiday, country_code, currency, government, census, open_data, weather.
 
-═══════════════════════════════════════════
-STEP 3: CLASSIFY NON-DATA ITEMS
-═══════════════════════════════════════════
-For items that are not data sources (Notebooks, Pipelines, Reports, SQLEndpoints that mirror a Lakehouse), assign the SAME label as the most sensitive data source they reference or share a name with.
+INSTRUCTIONS:
+1. For each Lakehouse, examine the TABLES listed above and match table names to the keyword patterns in the rules.
+2. If ANY table in a lakehouse matches Rule A, the ENTIRE lakehouse gets Rule A (highest wins).
+3. SQLEndpoints that share a display name with a Lakehouse inherit the SAME label.
+4. The Data Agent item inherits the label of the MOST sensitive data source in the workspace.
+5. Each lakehouse has different tables — they will likely need different labels.
+6. Do NOT try to query data sources. Use ONLY the table names I provided above.
 
-═══════════════════════════════════════════
-HARD CONSTRAINTS
-═══════════════════════════════════════════
-1. You MUST query tables before classifying. Do NOT guess from item names alone.
-2. Different data sources contain different data. Assigning every item the same label is WRONG.
-3. A lakehouse with only "publicholidays" is NOT the same sensitivity as one with trip records containing GPS + fares.
-4. When unsure between two labels, always choose the MORE sensitive one.
-5. If you cannot query a data source, classify it as "${secondHighest.name}" (assume sensitive until proven otherwise).
-
-═══════════════════════════════════════════
-OUTPUT FORMAT
-═══════════════════════════════════════════
-Respond with ONLY a raw JSON array. No markdown fences, no explanation text.
-[{"itemId":"<id>","suggestedLabelId":"<label id>","reason":"<specific columns/values found>"}]`;
+OUTPUT — JSON array only, no other text:
+[{"itemId":"<id>","suggestedLabelId":"<label id>","reason":"<which tables matched which rule>"}]`;
 }
 
 // ── Parse suggestions from agent response ─────────────────────────────────────
@@ -209,6 +212,10 @@ function parseSuggestions(text) {
 async function suggestLabels(token, workspaceId, items, labels) {
   console.log(`[LabelSuggester] Starting for ${items.length} items, ${labels.length} labels`);
 
+  // 0. Pre-fetch table schemas for all lakehouses
+  console.log(`[LabelSuggester] Fetching table schemas...`);
+  const tableSchemas = await fetchAllTableSchemas(token, workspaceId, items);
+
   // 1. Find the Data Agent
   const agent = await findDataAgent(token, workspaceId);
   const agentId = agent.id;
@@ -236,8 +243,9 @@ async function suggestLabels(token, workspaceId, items, labels) {
 
   try {
     // 5. Post message
-    const prompt = buildPrompt(items, labels);
+    const prompt = buildPrompt(items, labels, tableSchemas);
     console.log(`[LabelSuggester] Prompt length: ${prompt.length} chars`);
+    console.log(`[LabelSuggester] Prompt preview:\n${prompt.slice(0, 800)}...`);
     const msgResp = await assistantRequest(baseUrl, `/threads/${threadId}/messages`, token, {
       role: 'user',
       content: prompt,
