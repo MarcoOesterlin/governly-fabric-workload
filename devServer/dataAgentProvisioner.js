@@ -235,7 +235,7 @@ async function pollJobStatus(token, workspaceId, notebookId, jobInstanceId, maxW
  */
 async function provisionDataAgent(token, workspaceId, instanceName) {
   const agentName    = 'Governly Data Agent';
-  const notebookName = `Governly - ${instanceName} - Data Agent Provisioner`;
+  const notebookName = `Governly Data Agent Provisioner`;
 
   console.log(`[DataAgent] Provisioning for workspace ${workspaceId}, instance "${instanceName}"`);
 
@@ -250,7 +250,7 @@ async function provisionDataAgent(token, workspaceId, instanceName) {
   });
   const encodedPlatform = Buffer.from(platformContent).toString('base64');
 
-  // ── Create the notebook item ───────────────────────────────────────────────
+  // ── Create the notebook item (or reuse if it already exists) ─────────────
   const createBody = JSON.stringify({
     displayName: notebookName,
     type: 'Notebook',
@@ -288,6 +288,19 @@ async function provisionDataAgent(token, workspaceId, instanceName) {
     await pollOperation(token, operationId);
     const result = await getOperationResult(token, operationId);
     notebookId = result.id;
+  } else if (createResp.status === 409) {
+    // Notebook already exists — find its ID from the workspace items list
+    console.log(`[DataAgent] Notebook already exists, looking up existing ID...`);
+    const listResp = await httpRequest(
+      `${FABRIC_API}/workspaces/${workspaceId}/items?type=Notebook`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!listResp.ok) throw new Error(`Failed to list workspace items (${listResp.status})`);
+    const items = JSON.parse(listResp.body).value ?? [];
+    const existing = items.find(i => i.displayName === notebookName);
+    if (!existing) throw new Error(`Notebook conflict but could not find existing notebook by name "${notebookName}"`);
+    notebookId = existing.id;
+    console.log(`[DataAgent] Reusing existing notebook: ${notebookId}`);
   } else {
     throw new Error(`Failed to create notebook (${createResp.status}): ${createResp.body.slice(0, 400)}`);
   }
