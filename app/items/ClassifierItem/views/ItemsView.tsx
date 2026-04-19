@@ -319,12 +319,26 @@ export const ItemsView: React.FC<ItemsViewProps> = ({
         </div>
       )}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16,
+        padding: '12px 16px', borderRadius: 8,
+        background: 'linear-gradient(135deg, #e8defb 0%, #d4e8fc 100%)',
+        border: '1px solid #b4a7d6',
+      }}>
+        <Sparkle24Regular style={{ color: '#6b21a8', fontSize: 20, flexShrink: 0 }} />
+        <span style={{ flex: 1, fontSize: 13, color: '#3b1f6e' }}>
+          Use the <strong>Data Agent</strong> to analyze your data sources and suggest sensitivity labels for each item.
+        </span>
         <Button
-          appearance="subtle"
+          appearance="primary"
           icon={suggesting ? <Spinner size="tiny" /> : <Sparkle24Regular />}
           disabled={suggesting || items.length === 0 || labels.length === 0}
           onClick={suggestAll}
+          style={{
+            background: suggesting ? undefined : 'linear-gradient(135deg, #7c3aed, #4f46e5)',
+            borderColor: '#5b21b6',
+            fontWeight: 600,
+          }}
         >
           {suggesting ? 'Analyzing with Data Agent…' : 'Suggest Labels'}
         </Button>

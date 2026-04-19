@@ -6,6 +6,7 @@
  */
 
 const https = require('https');
+const crypto = require('crypto');
 
 const FABRIC_API = 'https://api.fabric.microsoft.com/v1';
 const AGENT_NAME = 'Governly Data Agent';
@@ -63,30 +64,21 @@ async function findDataAgent(token, workspaceId) {
 }
 
 async function getPublishedUrl(token, workspaceId, agentId) {
-  // The published base URL follows the Fabric pattern
-  const resp = await httpRequest(
-    `${FABRIC_API}/workspaces/${workspaceId}/dataAgents/${agentId}`,
-    { headers: { Authorization: `Bearer ${token}` } }
-  );
-  if (resp.ok) {
-    const data = JSON.parse(resp.body);
-    if (data.publishedUrl) return data.publishedUrl;
-  }
-
-  // Construct the standard Fabric data agent published URL
-  return `https://api.fabric.microsoft.com/v1/workspaces/${workspaceId}/dataAgents/${agentId}/published`;
+  // Fabric Data Agent exposes OpenAI Assistants API at this path
+  return `https://api.fabric.microsoft.com/v1/workspaces/${workspaceId}/dataagents/${agentId}/aiassistant/openai`;
 }
 
 // ── OpenAI Assistants API helpers ─────────────────────────────────────────────
 
-function assistantRequest(baseUrl, path, token, body) {
-  const url = `${baseUrl}${path}?api-version=2024-05-01-preview`;
+function assistantRequest(baseUrl, path, token, body, method) {
+  const url = `${baseUrl}${path}${path.includes('?') ? '&' : '?'}api-version=2024-05-01-preview`;
   const opts = {
-    method: body ? 'POST' : 'GET',
+    method: method || (body ? 'POST' : 'GET'),
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
       Accept: 'application/json',
+      ActivityId: crypto.randomUUID(),
     },
   };
   if (body) {
@@ -256,10 +248,9 @@ async function suggestLabels(token, workspaceId, items, labels) {
 
     return { suggestions };
   } finally {
-    // 10. Cleanup: delete thread
+    // Cleanup: delete thread
     try {
-      await assistantRequest(baseUrl, `/threads/${threadId}`, token);
-      // DELETE not easily done with our helper, but thread will expire anyway
+      await assistantRequest(baseUrl, `/threads/${threadId}`, token, null, 'DELETE');
     } catch { /* ignore cleanup errors */ }
   }
 }
