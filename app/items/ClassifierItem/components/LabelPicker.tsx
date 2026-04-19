@@ -1,5 +1,5 @@
 import React from 'react';
-import { Combobox, Option, OptionGroup, Tooltip } from '@fluentui/react-components';
+import { Combobox, Option, OptionGroup } from '@fluentui/react-components';
 import { SensitivityLabel } from '../../../clients/GovernlyApiClient';
 
 interface LabelPickerProps {
@@ -48,23 +48,20 @@ export const LabelPicker: React.FC<LabelPickerProps> = ({
   const groupedParents = parentLabels.filter(p => childrenByParent[p.id]?.length > 0);
 
   const renderLabel = (label: SensitivityLabel) => (
-    <Tooltip
-      key={label.id}
-      content={label.description || label.name}
-      relationship="description"
-      withArrow
-      positioning="after"
-    >
-      <Option value={label.id} text={label.name}>
+    <Option key={label.id} value={label.id} text={label.name}>
+      <span style={{ display: 'flex', flexDirection: 'column' }}>
         <span style={{ display: 'flex', alignItems: 'center' }}>
           <ColorSwatch color={label.color} />
           <span>{label.name}</span>
-          <span style={{ marginLeft: 8, fontSize: 11, color: '#888' }}>
-            Level {label.sensitivity}
-          </span>
+          <span style={{ marginLeft: 8, fontSize: 11, color: '#888' }}>Level {label.sensitivity}</span>
         </span>
-      </Option>
-    </Tooltip>
+        {label.description && (
+          <span style={{ fontSize: 11, color: '#888', marginLeft: 16, marginTop: 1 }}>
+            {label.description}
+          </span>
+        )}
+      </span>
+    </Option>
   );
 
   return (
