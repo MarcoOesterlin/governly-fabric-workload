@@ -61,11 +61,21 @@ export interface BulkOperationResult {
 }
 
 export interface DataAgentProvisionResult {
-  notebookId: string;
-  notebookName: string;
-  notebookUrl: string;
-  jobTriggered: boolean;
+  agentId?: string;
+  agentName?: string;
+  agentUrl?: string;
+  jobError?: string;
   message: string;
+}
+
+export interface LabelSuggestion {
+  itemId: string;
+  suggestedLabelId: string;
+  reason: string;
+}
+
+export interface LabelSuggestionsResult {
+  suggestions: LabelSuggestion[];
 }
 
 /**
@@ -365,5 +375,28 @@ export class GovernlyApiClient {
     }
 
     return response.json() as Promise<DataAgentProvisionResult>;
+  }
+
+  /**
+   * Ask the Fabric Data Agent to suggest sensitivity labels for workspace items.
+   * Returns an array of suggestions mapping item IDs to suggested label IDs.
+   */
+  async suggestLabels(
+    workspaceId: string,
+    items: Array<{ id: string; displayName: string; type: string }>,
+    labels: Array<{ id: string; name: string; description?: string; sensitivity: number }>
+  ): Promise<LabelSuggestionsResult> {
+    const response = await fetch('/api/suggest-labels', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspaceId, items, labels }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Label suggestion failed (${response.status}): ${text}`);
+    }
+
+    return response.json() as Promise<LabelSuggestionsResult>;
   }
 }

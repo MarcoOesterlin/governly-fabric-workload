@@ -7,6 +7,7 @@ const manifestApi = require('./manifestApi');
 const workloadApi = require('./workloadApi');
 const governlyProxy = require('./governlyProxy');
 const { provisionDataAgent } = require('./dataAgentProvisioner');
+const { suggestLabels } = require('./labelSuggester');
 
 /**
  * Register dev server manifest APIs with an Express application
@@ -31,6 +32,21 @@ function registerDevServerApis(app) {
       res.json(result);
     } catch (err) {
       console.error('[Provision] Error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/suggest-labels', async (req, res) => {
+    const { workspaceId, items, labels } = req.body ?? {};
+    if (!workspaceId || !items?.length || !labels?.length) {
+      return res.status(400).json({ error: 'Request body must include "workspaceId", "items", and "labels".' });
+    }
+    try {
+      const token = governlyProxy.acquireFabricToken();
+      const result = await suggestLabels(token, workspaceId, items, labels);
+      res.json(result);
+    } catch (err) {
+      console.error('[SuggestLabels] Error:', err.message);
       res.status(500).json({ error: err.message });
     }
   });

@@ -15,6 +15,7 @@ import {
   Tooltip,
   Button,
 } from '@fluentui/react-components';
+import { Sparkle24Regular } from '@fluentui/react-icons';
 import { useTranslation } from 'react-i18next';
 import { FabricItem, GovernlyApiClient, SensitivityLabel } from '../../../clients/GovernlyApiClient';
 import { LabelPicker, REMOVE_LABEL } from '../components/LabelPicker';
@@ -85,6 +86,7 @@ export const ItemsView: React.FC<ItemsViewProps> = ({
   const [statusMsg, setStatusMsg] = useState<StatusMessage | null>(null);
   const [pendingChanges, setPendingChanges] = useState<Record<string, string>>({});
   const [applying, setApplying] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
 
   const hasPending = Object.keys(pendingChanges).length > 0;
 
@@ -93,6 +95,36 @@ export const ItemsView: React.FC<ItemsViewProps> = ({
   }, []);
 
   const discardChanges = useCallback(() => setPendingChanges({}), []);
+
+  const suggestAll = useCallback(async () => {
+    if (!workspaceId || labels.length === 0 || items.length === 0) return;
+    setSuggesting(true);
+    setStatusMsg(null);
+    try {
+      const appliableLabels = labels
+        .filter(l => l.isActive && l.isAppliable)
+        .map(l => ({ id: l.id, name: l.name, description: l.description, sensitivity: l.sensitivity }));
+      const itemsPayload = items.map(i => ({ id: i.id, displayName: i.displayName, type: i.type }));
+      const result = await apiClient.suggestLabels(workspaceId, itemsPayload, appliableLabels);
+      if (result.suggestions.length === 0) {
+        setStatusMsg({ type: 'error', text: 'Data Agent returned no suggestions. Make sure it has been provisioned and published.' });
+      } else {
+        const newPending: Record<string, string> = {};
+        for (const s of result.suggestions) {
+          if (appliableLabels.some(l => l.id === s.suggestedLabelId)) {
+            newPending[s.itemId] = s.suggestedLabelId;
+          }
+        }
+        setPendingChanges(prev => ({ ...prev, ...newPending }));
+        setStatusMsg({ type: 'success', text: `Data Agent suggested labels for ${result.suggestions.length} item(s). Review and apply when ready.` });
+      }
+    } catch (err: any) {
+      setStatusMsg({ type: 'error', text: `Suggestion failed: ${err.message}` });
+    } finally {
+      setSuggesting(false);
+      setTimeout(() => setStatusMsg(null), 12000);
+    }
+  }, [apiClient, workspaceId, items, labels]);
 
   const applyChanges = useCallback(async () => {
     setApplying(true);
@@ -286,6 +318,17 @@ export const ItemsView: React.FC<ItemsViewProps> = ({
           </Button>
         </div>
       )}
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+        <Button
+          appearance="subtle"
+          icon={suggesting ? <Spinner size="tiny" /> : <Sparkle24Regular />}
+          disabled={suggesting || items.length === 0 || labels.length === 0}
+          onClick={suggestAll}
+        >
+          {suggesting ? 'Analyzing with Data Agent…' : 'Suggest Labels'}
+        </Button>
+      </div>
 
       {items.length === 0 ? (
         <Text>{t('Classifier_Items_Empty', 'No items found in this workspace.')}</Text>
