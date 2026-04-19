@@ -240,7 +240,7 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
               }).catch(() => {
                 // fallback: open in new browser tab
                 workloadClient.navigation.openBrowserTab({
-                  url: `https://app.fabric.microsoft.com/groups/${workspaceId}`,
+                  path: `https://app.fabric.microsoft.com/groups/${workspaceId}`,
                 }).catch(console.error);
               });
             }}
@@ -301,8 +301,8 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
               {dataAgentResult?.notebookId && workspaceId && (
                 <button
                   onClick={() => {
-                    const url = `https://app.fabric.microsoft.com/groups/${workspaceId}/synapsenotebooks/${dataAgentResult.notebookId}`;
-                    workloadClient.navigation.openBrowserTab({ url }).catch(console.error);
+                    const path = `https://app.fabric.microsoft.com/groups/${workspaceId}/synapsenotebooks/${dataAgentResult.notebookId}`;
+                    workloadClient.navigation.openBrowserTab({ path }).catch(console.error);
                   }}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontWeight: 600, padding: 0, textDecoration: 'underline' }}
                 >
