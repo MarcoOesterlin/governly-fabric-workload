@@ -163,34 +163,24 @@ export const DashboardTab: React.FC<Props> = ({ darkMode, runs, summaries, loadi
     grid:        { borderColor: t.border },
   };
 
-  // ── Treemap (table health) ─────────────────────────────────────────────────────
-  const treemapColors = tableStats.map(ts => ts.rate >= 95 ? t.pass : ts.rate >= 80 ? t.warn : t.fail);
-  const treemapOptions: ApexOptions = {
-    chart:   { ...chartBase, type: 'treemap' },
-    theme:   { mode: darkMode ? 'dark' : 'light' },
-    colors:  treemapColors,
-    legend:  { show: false },
-    dataLabels: {
-      enabled: true,
-      style:   { fontSize: '12px', fontFamily: 'inherit', fontWeight: 600, colors: ['#fff'] },
-      formatter: (text: string, op: any) => [`${text}`, `${tableStats[op.dataPointIndex]?.rate ?? 0}%`],
+  // ── Table Health bar chart ─────────────────────────────────────────────────────
+  const tableBarOptions: ApexOptions = {
+    chart:       { ...chartBase, type: 'bar' },
+    theme:       { mode: darkMode ? 'dark' : 'light' },
+    plotOptions: { bar: { borderRadius: 4, horizontal: true, barHeight: '60%', distributed: true } },
+    colors:      tableStats.map(ts => ts.rate >= 95 ? t.pass : ts.rate >= 80 ? t.warn : t.fail),
+    legend:      { show: false },
+    xaxis: {
+      categories: tableStats.map(ts => ts.name),
+      min: 0, max: 100,
+      labels: { formatter: (v: any) => `${v}%`, style: { colors: t.subtext, fontSize: '11px' } },
     },
-    plotOptions: { treemap: { distributed: true, enableShades: false } },
-    tooltip: {
-      custom: ({ dataPointIndex }: any) => {
-        const ts = tableStats[dataPointIndex];
-        if (!ts) return '';
-        const color = ts.rate >= 95 ? t.pass : ts.rate >= 80 ? t.warn : t.fail;
-        return `<div style="padding:8px 12px;font-size:12px;background:${t.surface};border:1px solid ${t.border};border-radius:4px;color:${t.text}">
-          <strong>${ts.name}</strong><br/>
-          Pass rate: <span style="color:${color};font-weight:700">${ts.rate}%</span><br/>
-          Rows: ${ts.totalRows.toLocaleString()}
-        </div>`;
-      },
-      theme: darkMode ? 'dark' : 'light',
-    },
+    yaxis:      { labels: { style: { colors: t.subtext, fontSize: '11px' }, maxWidth: 160 } },
+    dataLabels: { enabled: true, formatter: (v: any) => `${Math.round(v)}%`, style: { fontSize: '11px', colors: ['#fff'] } },
+    tooltip:    { y: { formatter: (v: number) => `${v}%` }, theme: darkMode ? 'dark' : 'light' },
+    grid:       { borderColor: t.border },
   };
-  const treemapSeries = [{ data: tableStats.map(ts => ({ x: ts.name, y: Math.max(ts.totalRows || 1, 1) })) }];
+  const tableBarSeries = [{ name: 'Pass Rate', data: tableStats.map(ts => ts.rate) }];
 
   // ── UI helpers ─────────────────────────────────────────────────────────────────
   const panel = (children: React.ReactNode, style?: React.CSSProperties) => (
@@ -290,19 +280,23 @@ export const DashboardTab: React.FC<Props> = ({ darkMode, runs, summaries, loadi
           </>, { flex: 1, minWidth: 260 })}
         </div>
 
-        {/* Table treemap + Top Issues */}
-        <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
+        {/* Table Health — horizontal bar */}
+        {tableStats.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            {panel(<>
+              {panelTitle('Table Health', 'Sorted worst → best')}
+              <ReactApexChart
+                type="bar"
+                options={tableBarOptions}
+                series={tableBarSeries}
+                height={Math.max(180, tableStats.length * 40 + 30)}
+              />
+            </>)}
+          </div>
+        )}
 
-          {tableStats.length > 0 && panel(<>
-            {panelTitle('Table Health', 'Size = rows scanned · color = pass rate')}
-            <ReactApexChart
-              type="treemap"
-              options={treemapOptions}
-              series={treemapSeries}
-              height={Math.min(320, Math.max(180, tableStats.length * 55))}
-            />
-          </>, { flex: 1, minWidth: 300 })}
-
+        {/* Top Issues — data table */}
+        <div style={{ marginBottom: 16 }}>
           {panel(<>
             {panelTitle(
               topIssues.length > 0 ? 'Top Issues' : 'No Issues',
@@ -315,34 +309,45 @@ export const DashboardTab: React.FC<Props> = ({ darkMode, runs, summaries, loadi
                 <div style={{ fontSize: 12, color: t.subtext }}>No failing rules in this run</div>
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {topIssues.map((issue, i) => {
-                  const score = Math.round(issue.metric_value);
-                  const color = score >= 80 ? t.warn : t.fail;
-                  const pct = Math.max(0, Math.min(100, score));
-                  return (
-                    <div key={i} style={{ padding: '8px 10px', background: t.bg, borderRadius: 6, border: `1px solid ${t.border}` }}>
-                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 4 }}>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: t.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                          {issue.table_name}<span style={{ color: t.subtext, fontWeight: 400 }}>.{issue.column_name}</span>
-                        </span>
-                        <span style={{ fontSize: 13, fontWeight: 700, color, flexShrink: 0 }}>{score}%</span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ flex: 1, height: 4, background: t.border, borderRadius: 2, overflow: 'hidden' }}>
-                          <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 2 }} />
-                        </div>
-                        <span style={{ fontSize: 10, color: t.subtext, flexShrink: 0 }}>
-                          {DQ_DIMENSION_LABELS[issue.dimension] ?? issue.dimension}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      {['Table', 'Column', 'Dimension', 'Score', 'Threshold', 'Status'].map(h => (
+                        <th key={h} style={{
+                          padding: '6px 12px', textAlign: 'left', color: t.subtext,
+                          fontWeight: 700, fontSize: 10, textTransform: 'uppercase' as const,
+                          letterSpacing: '0.6px', borderBottom: `1px solid ${t.border}`, whiteSpace: 'nowrap' as const,
+                        }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {topIssues.map((issue, i) => {
+                      const score     = Math.round(issue.metric_value);
+                      const threshold = Math.round(issue.threshold ?? 0);
+                      const scoreColor = score >= 80 ? t.warn : t.fail;
+                      return (
+                        <tr key={i} style={{ borderBottom: `1px solid ${t.border}33` }}>
+                          <td style={{ padding: '8px 12px', color: t.text, fontWeight: 500, whiteSpace: 'nowrap' as const, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis' }}>{issue.table_name}</td>
+                          <td style={{ padding: '8px 12px', color: t.subtext, whiteSpace: 'nowrap' as const, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis' }}>{issue.column_name ?? '—'}</td>
+                          <td style={{ padding: '8px 12px', color: t.subtext, whiteSpace: 'nowrap' as const }}>{DQ_DIMENSION_LABELS[issue.dimension as DqDimension] ?? issue.dimension}</td>
+                          <td style={{ padding: '8px 12px', color: scoreColor, fontWeight: 700, whiteSpace: 'nowrap' as const }}>{score}%</td>
+                          <td style={{ padding: '8px 12px', color: t.subtext, whiteSpace: 'nowrap' as const }}>{threshold}%</td>
+                          <td style={{ padding: '8px 12px' }}>
+                            <span style={{
+                              padding: '2px 8px', borderRadius: 20, fontSize: 10, fontWeight: 700,
+                              background: `${t.fail}22`, color: t.fail, border: `1px solid ${t.fail}44`,
+                            }}>FAIL</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
-          </>, { flex: '0 0 310px', minWidth: 260 })}
-
+          </>)}
         </div>
       </>)}
     </div>
