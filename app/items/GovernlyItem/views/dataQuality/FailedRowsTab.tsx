@@ -159,6 +159,10 @@ export const FailedRowsTab: React.FC<Props> = ({
 
         <select value={filterTable} onChange={e => setFilterTable(e.target.value)} style={inputStyle}>
           <option value="">All tables</option>
+          {/* If drilled to a table not present in failed rows, show it as a placeholder option */}
+          {filterTable && !uniqueTables.includes(filterTable) && (
+            <option value={filterTable}>{filterTable} — no rows captured</option>
+          )}
           {uniqueTables.map(tb => <option key={tb} value={tb}>{tb}</option>)}
         </select>
 
@@ -195,7 +199,15 @@ export const FailedRowsTab: React.FC<Props> = ({
           <div style={{ padding: 32, color: t.subtext, textAlign: 'center', fontSize: 14 }}>
             {allRows.length === 0
               ? 'All checks passed — no failed rows for this run.'
-              : `No rows match the current filters. (${allRows.length} failed rows in this run)`}
+              : filterTable && !uniqueTables.includes(filterTable)
+                ? <>
+                    <div>No individual failed rows were captured for <strong style={{ color: t.text }}>{filterTable}</strong>.</div>
+                    <div style={{ fontSize: 12, marginTop: 8, color: t.muted }}>
+                      This can happen when a table has complex column types (arrays, structs) that prevented row capture.<br />
+                      Re-run the DQ notebook to capture rows with the updated template.
+                    </div>
+                  </>
+                : `No rows match the current filters. (${allRows.length} failed rows in this run)`}
           </div>
         )}
 
