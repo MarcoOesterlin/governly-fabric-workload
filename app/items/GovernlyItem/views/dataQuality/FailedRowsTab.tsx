@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { GovernlyApiClient } from '../../../../clients/GovernlyApiClient';
 import { DqRunMeta, DqFailedRow, DQ_DIMENSION_LABELS, DqDimension, DARK_THEME, LIGHT_THEME } from './dqTypes';
 
@@ -9,17 +9,33 @@ interface Props {
   initialRuns: DqRunMeta[];
   initialFailedRows: { rows: DqFailedRow[]; total: number } | null;
   preloadLoading: boolean;
-  /** Pre-select a table filter when navigating here from Table Health */
+  /** Pre-select a table filter when drilling from Table Health */
   initialTableFilter?: string;
+  /** Pre-select a specific run when drilling from Table Health */
+  initialRunId?: string;
 }
 
 const PAGE_SIZE = 50;
 
-export const FailedRowsTab: React.FC<Props> = ({ apiClient, workspaceId, darkMode, initialRuns, initialFailedRows, preloadLoading, initialTableFilter }) => {
+function mkRunLabel(r: DqRunMeta, isLatest: boolean) {
+  return `${r.year}-${r.month}-${r.day}  ${r.run_id.slice(0, 2)}:${r.run_id.slice(2, 4)}:${r.run_id.slice(4, 6)} UTC${isLatest ? '  (latest)' : ''}`;
+}
+
+export const FailedRowsTab: React.FC<Props> = ({
+  apiClient, workspaceId, darkMode, initialRuns, initialFailedRows, preloadLoading, initialTableFilter, initialRunId,
+}) => {
   const t = darkMode ? DARK_THEME : LIGHT_THEME;
 
-  const [runs, setRuns]         = useState<DqRunMeta[]>(initialRuns);
-  const [allRows, setAllRows]   = useState<DqFailedRow[]>(initialFailedRows?.rows ?? []);
+  const [runs, setRuns] = useState<DqRunMeta[]>(initialRuns);
+
+  // Determine if we're starting on the latest run (preloaded data applies)
+  const startRunId      = initialRunId ?? initialRuns[0]?.run_id ?? '';
+  const startsOnLatest  = !initialRunId || initialRunId === initialRuns[0]?.run_id;
+
+  const [selectedRunId, setSelectedRunId] = useState<string>(startRunId);
+  const [allRows, setAllRows]   = useState<DqFailedRow[]>(
+    startsOnLatest && initialFailedRows ? initialFailedRows.rows : []
+  );
   const [page, setPage]         = useState(1);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState<string | null>(null);
@@ -28,7 +44,24 @@ export const FailedRowsTab: React.FC<Props> = ({ apiClient, workspaceId, darkMod
   const [filterColumn, setFilterColumn] = useState('');
   const [filterDim, setFilterDim]       = useState('');
 
-  // Apply drill-through when initialTableFilter changes (navigation from Dashboard)
+  // Always-current ref to initialFailedRows so effects don't stale-close
+  const preloadRef = useRef(initialFailedRows);
+  preloadRef.current = initialFailedRows;
+
+  // Track which run's rows are in allRows; prevents redundant fetches
+  const lastLoadedRunRef = useRef<string>(startsOnLatest ? startRunId : '');
+
+  // Sync runs list when preload arrives
+  useEffect(() => { setRuns(initialRuns); }, [initialRuns]);
+
+  // Set selectedRunId once runs arrive if it was empty at mount
+  useEffect(() => {
+    if (!selectedRunId && initialRuns.length > 0) {
+      setSelectedRunId(initialRunId ?? initialRuns[0].run_id);
+    }
+  }, [initialRuns]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Apply drill-through table filter on navigation from Dashboard
   useEffect(() => {
     setFilterTable(initialTableFilter ?? '');
     setFilterColumn('');
@@ -36,37 +69,49 @@ export const FailedRowsTab: React.FC<Props> = ({ apiClient, workspaceId, darkMod
     setPage(1);
   }, [initialTableFilter]);
 
-  // Sync when preloaded data arrives (contains all rows now)
-  useEffect(() => { setRuns(initialRuns); }, [initialRuns]);
+  // Apply drill-through run on navigation from Dashboard
   useEffect(() => {
-    if (initialFailedRows) {
-      setAllRows(initialFailedRows.rows);
-      setPage(1);
+    if (initialRunId) {
+      lastLoadedRunRef.current = ''; // force reload
+      setSelectedRunId(initialRunId);
     }
-  }, [initialFailedRows]);
+  }, [initialRunId]);
 
-  const latestRun = runs[0] ?? null;
+  // Load rows whenever selectedRunId changes or runs list arrives
+  useEffect(() => {
+    if (!runs.length || !selectedRunId) return;
+    if (lastLoadedRunRef.current === selectedRunId) return;
+    lastLoadedRunRef.current = selectedRunId;
 
-  const loadAllRows = useCallback((runMeta: DqRunMeta) => {
+    const latestRunId = runs[0].run_id;
+    if (selectedRunId === latestRunId && preloadRef.current !== null) {
+      setAllRows(preloadRef.current!.rows);
+      setPage(1);
+      return;
+    }
+
+    const runMeta = runs.find(r => r.run_id === selectedRunId);
+    if (!runMeta) { lastLoadedRunRef.current = ''; return; }
+
     setLoading(true);
     setError(null);
     apiClient.getAllDqFailedRows(workspaceId, runMeta)
       .then(rows => { setAllRows(rows); setPage(1); setLoading(false); })
-      .catch(err => { setError(err.message); setLoading(false); });
-  }, [apiClient, workspaceId]);
-
-  // Only fetch from API if we have no preloaded data for this run
-  useEffect(() => {
-    if (!latestRun) { setAllRows([]); return; }
-    if (initialFailedRows !== null) return; // preload already provided all rows
-    setFilterTable('');
-    setFilterColumn('');
-    setFilterDim('');
-    loadAllRows(latestRun);
-  }, [latestRun?.run_id]); // eslint-disable-line react-hooks/exhaustive-deps
+      .catch(err => { setError(err.message); setLoading(false); lastLoadedRunRef.current = ''; });
+  }, [selectedRunId, runs.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset to page 1 when filters change
   useEffect(() => { setPage(1); }, [filterTable, filterColumn, filterDim]);
+
+  // Change run from dropdown (clears column/dim filters, keeps table filter)
+  const handleRunChange = useCallback((newRunId: string) => {
+    if (newRunId === selectedRunId) return;
+    lastLoadedRunRef.current = '';
+    setSelectedRunId(newRunId);
+    setFilterColumn('');
+    setFilterDim('');
+    setFilterTable('');
+  }, [selectedRunId]);
 
   // Derive unique dropdown options from ALL rows
   const uniqueTables  = [...new Set(allRows.map(r => r.table_name))].sort();
@@ -97,19 +142,18 @@ export const FailedRowsTab: React.FC<Props> = ({ apiClient, workspaceId, darkMod
     fontSize: 12, background: t.surface, color: t.text,
   };
 
-  const latestLabel = latestRun
-    ? `${latestRun.year}-${latestRun.month}-${latestRun.day} ${latestRun.run_id.slice(0,2)}:${latestRun.run_id.slice(2,4)}:${latestRun.run_id.slice(4,6)} UTC`
-    : '';
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: t.bg, color: t.text }}>
       {/* Controls */}
       <div style={{ padding: '12px 16px', borderBottom: `1px solid ${t.border}`, display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', flexShrink: 0, background: t.surface }}>
-        {latestLabel && (
-          <span style={{ fontSize: 12, color: t.subtext, padding: '5px 10px', background: t.bg, borderRadius: 4, border: `1px solid ${t.border}` }}>
-            Latest run: <strong style={{ color: t.text }}>{latestLabel}</strong>
-          </span>
-        )}
+
+        {/* Run selector */}
+        <select value={selectedRunId} onChange={e => handleRunChange(e.target.value)} style={inputStyle}>
+          {runs.length === 0
+            ? <option value="">Loading runs…</option>
+            : runs.map((r, i) => <option key={r.run_id} value={r.run_id}>{mkRunLabel(r, i === 0)}</option>)
+          }
+        </select>
 
         <div style={{ width: 1, height: 20, background: t.border }} />
 
@@ -141,15 +185,17 @@ export const FailedRowsTab: React.FC<Props> = ({ apiClient, workspaceId, darkMod
 
       {/* Table */}
       <div style={{ flex: 1, overflowY: 'auto', background: t.bg }}>
-        {!latestRun && !loading && !preloadLoading && (
+        {!runs.length && !loading && !preloadLoading && (
           <div style={{ padding: 32, color: t.muted, textAlign: 'center', fontSize: 14 }}>
             No DQ runs found. Run a notebook from the Configure tab first.
             <div style={{ fontSize: 12, marginTop: 8, color: t.subtext }}>Results are stored in the Governly_DQ lakehouse.</div>
           </div>
         )}
-        {latestRun && filtered.length === 0 && !loading && (
+        {runs.length > 0 && filtered.length === 0 && !loading && (
           <div style={{ padding: 32, color: t.subtext, textAlign: 'center', fontSize: 14 }}>
-            {allRows.length === 0 ? 'All checks passed — no failed rows.' : 'No rows match the current filters.'}
+            {allRows.length === 0
+              ? 'All checks passed — no failed rows for this run.'
+              : `No rows match the current filters. (${allRows.length} failed rows in this run)`}
           </div>
         )}
 

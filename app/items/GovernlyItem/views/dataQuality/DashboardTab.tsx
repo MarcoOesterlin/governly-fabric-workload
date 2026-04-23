@@ -12,7 +12,7 @@ interface Props {
   summaries: Record<string, DqRunSummary>;
   loading: boolean;
   error: string | null;
-  onTableClick?: (tableName: string) => void;
+  onTableClick?: (tableName: string, runId: string) => void;
 }
 
 export const DashboardTab: React.FC<Props> = ({ darkMode, runs, summaries, loading, error, onTableClick }) => {
@@ -191,7 +191,7 @@ export const DashboardTab: React.FC<Props> = ({ darkMode, runs, summaries, loadi
       events: {
         dataPointSelection: (_e: any, _ctx: any, cfg: any) => {
           const tbl = tableStats[cfg.dataPointIndex];
-          if (tbl && onTableClick) onTableClick(tbl.name);
+          if (tbl && onTableClick) onTableClick(tbl.name, selectedRun);
         },
       },
     },
