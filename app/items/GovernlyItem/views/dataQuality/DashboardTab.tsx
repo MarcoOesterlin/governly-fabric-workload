@@ -60,7 +60,7 @@ export const DashboardTab: React.FC<Props> = ({ darkMode, runs, summaries, loadi
       .map(tbl => {
         const tr = results.filter(r => r.table_name === tbl);
         const rate = Math.round(tr.filter(r => r.passed).length / tr.length * 100);
-        const totalRows = tr.reduce((s, r) => s + (r.total_rows ?? 0), 0);
+        const totalRows = tr[0]?.total_rows ?? 0;
         return { name: tbl, rate, totalRows };
       })
       .sort((a, b) => a.rate - b.rate);
@@ -75,7 +75,8 @@ export const DashboardTab: React.FC<Props> = ({ darkMode, runs, summaries, loadi
   const passedRules   = results.filter(r => r.passed).length;
   const failedRules   = totalRules - passedRules;
   const tablesHit     = new Set(results.map(r => r.table_name)).size;
-  const totalRowsEval = results.reduce((sum, r) => sum + (r.total_rows ?? 0), 0);
+  const totalRowsEval = [...new Set(results.map(r => r.table_name))]
+    .reduce((sum, tbl) => sum + (results.find(r => r.table_name === tbl)?.total_rows ?? 0), 0);
   const gaugePassRate = overallPassRate ?? 0;
   const gaugeColor    = gaugePassRate >= 0.95 ? t.pass : gaugePassRate >= 0.70 ? t.warn : t.fail;
 
