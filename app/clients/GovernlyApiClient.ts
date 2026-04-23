@@ -479,4 +479,15 @@ export class GovernlyApiClient {
     if (!resp.ok) throw new Error(`getDqFailedRows failed (${resp.status}): ${await resp.text()}`);
     return resp.json() as Promise<{ rows: DqFailedRow[]; total: number; page: number; pageSize: number }>;
   }
+
+  async getAllDqFailedRows(workspaceId: string, runMeta: DqRunMeta): Promise<DqFailedRow[]> {
+    const qs = new URLSearchParams({ workspaceId, runId: runMeta.run_id, all: 'true' });
+    if (runMeta.year)  qs.set('year',  runMeta.year);
+    if (runMeta.month) qs.set('month', runMeta.month);
+    if (runMeta.day)   qs.set('day',   runMeta.day);
+    const resp = await fetch(`/api/dq-failed-rows?${qs}`);
+    if (!resp.ok) throw new Error(`getAllDqFailedRows failed (${resp.status}): ${await resp.text()}`);
+    const data = await resp.json() as { rows: DqFailedRow[]; total: number };
+    return data.rows;
+  }
 }

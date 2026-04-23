@@ -396,7 +396,7 @@ function registerDqRoutes(app) {
           const frPath = `governly_dq/year=${latest.year}/month=${latest.month}/day=${latest.day}/run_id=${latest.run_id}/failed_rows.json`;
           const frData = await readOneLakeFile(workspaceId, dqLakehouseId, frPath);
           const all = frData.failed_rows ?? [];
-          latestFailedRows = { rows: all.slice(0, 50), total: all.length };
+          latestFailedRows = { rows: all, total: all.length };
           console.log(`[DQ-Preload] Loaded ${all.length} failed rows for run ${latest.run_id}`);
         } catch (_) { /* no failed rows file for this run */ }
       }
@@ -576,6 +576,9 @@ function registerDqRoutes(app) {
       const data = await readOneLakeFile(workspaceId, dqLakehouseId, filePath);
       const all = data.failed_rows ?? [];
       const total = all.length;
+      if (req.query.all === 'true') {
+        return res.json({ rows: all, total, page: 1, pageSize: total });
+      }
       const rows = all.slice((page - 1) * pageSize, page * pageSize);
       res.json({ rows, total, page, pageSize });
     } catch (err) {

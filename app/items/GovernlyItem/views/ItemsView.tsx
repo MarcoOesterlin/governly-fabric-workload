@@ -88,6 +88,13 @@ export const ItemsView: React.FC<ItemsViewProps> = ({
   const [applying, setApplying] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
 
+  // Hide internal Governly infrastructure items from the list
+  const HIDDEN_NAMES = useMemo(() => [/^governly[_ ]dq$/i, /^governly data agent$/i], []);
+  const visibleItems = useMemo(
+    () => items.filter(i => !HIDDEN_NAMES.some(re => re.test(i.displayName?.trim() ?? ''))),
+    [items, HIDDEN_NAMES]
+  );
+
   const hasPending = Object.keys(pendingChanges).length > 0;
 
   const stageChange = useCallback((item: FabricItem, labelId: string) => {
@@ -97,14 +104,14 @@ export const ItemsView: React.FC<ItemsViewProps> = ({
   const discardChanges = useCallback(() => setPendingChanges({}), []);
 
   const suggestAll = useCallback(async () => {
-    if (!workspaceId || labels.length === 0 || items.length === 0) return;
+    if (!workspaceId || labels.length === 0 || visibleItems.length === 0) return;
     setSuggesting(true);
     setStatusMsg(null);
     try {
       const appliableLabels = labels
         .filter(l => l.isActive && l.isAppliable)
         .map(l => ({ id: l.id, name: l.name, description: l.description, sensitivity: l.sensitivity }));
-      const itemsPayload = items.map(i => ({ id: i.id, displayName: i.displayName, type: i.type }));
+      const itemsPayload = visibleItems.map(i => ({ id: i.id, displayName: i.displayName, type: i.type }));
       const result = await apiClient.suggestLabels(workspaceId, itemsPayload, appliableLabels);
       if (result.suggestions.length === 0) {
         setStatusMsg({ type: 'error', text: 'Data Agent returned no suggestions. Make sure it has been provisioned and published.' });
@@ -124,7 +131,7 @@ export const ItemsView: React.FC<ItemsViewProps> = ({
       setSuggesting(false);
       setTimeout(() => setStatusMsg(null), 12000);
     }
-  }, [apiClient, workspaceId, items, labels]);
+  }, [apiClient, workspaceId, visibleItems, labels]);
 
   const applyChanges = useCallback(async () => {
     setApplying(true);
@@ -141,7 +148,7 @@ export const ItemsView: React.FC<ItemsViewProps> = ({
     const failures: string[] = [];
 
     for (const [labelId, itemIds] of byLabel) {
-      const batchItems = items
+      const batchItems = visibleItems
         .filter(i => itemIds.includes(i.id))
         .map(i => ({ id: i.id, type: i.type }));
 
@@ -332,7 +339,7 @@ export const ItemsView: React.FC<ItemsViewProps> = ({
         <Button
           appearance="primary"
           icon={suggesting ? <Spinner size="tiny" /> : <Sparkle24Regular />}
-          disabled={suggesting || items.length === 0 || labels.length === 0}
+          disabled={suggesting || visibleItems.length === 0 || labels.length === 0}
           onClick={suggestAll}
           style={{
             background: suggesting ? undefined : 'linear-gradient(135deg, #7c3aed, #4f46e5)',
@@ -344,11 +351,11 @@ export const ItemsView: React.FC<ItemsViewProps> = ({
         </Button>
       </div>
 
-      {items.length === 0 ? (
+      {visibleItems.length === 0 ? (
         <Text>{t('Classifier_Items_Empty', 'No items found in this workspace.')}</Text>
       ) : (
         <DataGrid
-          items={items}
+          items={visibleItems}
           columns={columns}
           getRowId={(item: FabricItem) => item.id}
           style={{ width: '100%' }}

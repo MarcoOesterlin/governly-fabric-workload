@@ -16,58 +16,61 @@ const PAGE_SIZE = 50;
 export const FailedRowsTab: React.FC<Props> = ({ apiClient, workspaceId, darkMode, initialRuns, initialFailedRows, preloadLoading }) => {
   const t = darkMode ? DARK_THEME : LIGHT_THEME;
 
-  const [runs, setRuns]       = useState<DqRunMeta[]>(initialRuns);
-  const [rows, setRows]       = useState<DqFailedRow[]>(initialFailedRows?.rows ?? []);
-  const [total, setTotal]     = useState(initialFailedRows?.total ?? 0);
-  const [page, setPage]       = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState<string | null>(null);
+  const [runs, setRuns]         = useState<DqRunMeta[]>(initialRuns);
+  const [allRows, setAllRows]   = useState<DqFailedRow[]>(initialFailedRows?.rows ?? []);
+  const [page, setPage]         = useState(1);
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState<string | null>(null);
 
   const [filterTable, setFilterTable]   = useState('');
   const [filterColumn, setFilterColumn] = useState('');
   const [filterDim, setFilterDim]       = useState('');
 
-  // Sync when preloaded data arrives
+  // Sync when preloaded data arrives (contains all rows now)
   useEffect(() => { setRuns(initialRuns); }, [initialRuns]);
   useEffect(() => {
     if (initialFailedRows) {
-      setRows(initialFailedRows.rows);
-      setTotal(initialFailedRows.total);
+      setAllRows(initialFailedRows.rows);
       setPage(1);
     }
   }, [initialFailedRows]);
 
   const latestRun = runs[0] ?? null;
 
-  const loadRows = useCallback((runMeta: DqRunMeta, p: number) => {
+  const loadAllRows = useCallback((runMeta: DqRunMeta) => {
     setLoading(true);
     setError(null);
-    apiClient.getDqFailedRows(workspaceId, runMeta, p, PAGE_SIZE)
-      .then(res => { setRows(res.rows); setTotal(res.total); setPage(p); setLoading(false); })
+    apiClient.getAllDqFailedRows(workspaceId, runMeta)
+      .then(rows => { setAllRows(rows); setPage(1); setLoading(false); })
       .catch(err => { setError(err.message); setLoading(false); });
   }, [apiClient, workspaceId]);
 
-  // Only fetch from API if we have no preloaded data (e.g., preload failed or latestRun changed)
+  // Only fetch from API if we have no preloaded data for this run
   useEffect(() => {
-    if (!latestRun) { setRows([]); setTotal(0); return; }
-    // Skip if preload already provided page-1 data for this run
-    if (initialFailedRows !== null && page === 1) return;
+    if (!latestRun) { setAllRows([]); return; }
+    if (initialFailedRows !== null) return; // preload already provided all rows
     setFilterTable('');
     setFilterColumn('');
     setFilterDim('');
-    loadRows(latestRun, 1);
+    loadAllRows(latestRun);
   }, [latestRun?.run_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const filtered = rows.filter(r =>
-    (!filterTable  || r.table_name.toLowerCase().includes(filterTable.toLowerCase())) &&
-    (!filterColumn || r.column_name.toLowerCase().includes(filterColumn.toLowerCase())) &&
+  // Reset to page 1 when filters change
+  useEffect(() => { setPage(1); }, [filterTable, filterColumn, filterDim]);
+
+  // Derive unique dropdown options from ALL rows
+  const uniqueTables  = [...new Set(allRows.map(r => r.table_name))].sort();
+  const uniqueColumns = [...new Set(allRows.map(r => r.column_name))].sort();
+  const uniqueDims    = [...new Set(allRows.map(r => r.dimension))].sort() as DqDimension[];
+
+  // Client-side filter + paginate
+  const filtered    = allRows.filter(r =>
+    (!filterTable  || r.table_name === filterTable) &&
+    (!filterColumn || r.column_name === filterColumn) &&
     (!filterDim    || r.dimension === filterDim)
   );
-
-  const totalPages    = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const uniqueTables  = [...new Set(rows.map(r => r.table_name))];
-  const uniqueColumns = [...new Set(rows.map(r => r.column_name))];
-  const uniqueDims    = [...new Set(rows.map(r => r.dimension))] as DqDimension[];
+  const totalPages  = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const displayRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const TH: React.CSSProperties = {
     padding: '8px 10px', fontWeight: 600, fontSize: 12, color: t.subtext,
@@ -119,7 +122,10 @@ export const FailedRowsTab: React.FC<Props> = ({ apiClient, workspaceId, darkMod
         {error   && <span style={{ fontSize: 12, color: t.fail }}>{error}</span>}
 
         <span style={{ marginLeft: 'auto', fontSize: 12, color: t.subtext }}>
-          {total} failed row{total !== 1 ? 's' : ''} total
+          {filterTable || filterColumn || filterDim
+            ? `${filtered.length} of ${allRows.length} failed row${allRows.length !== 1 ? 's' : ''}`
+            : `${allRows.length} failed row${allRows.length !== 1 ? 's' : ''} total`
+          }
         </span>
       </div>
 
@@ -133,11 +139,11 @@ export const FailedRowsTab: React.FC<Props> = ({ apiClient, workspaceId, darkMod
         )}
         {latestRun && filtered.length === 0 && !loading && (
           <div style={{ padding: 32, color: t.subtext, textAlign: 'center', fontSize: 14 }}>
-            {total === 0 ? 'All checks passed — no failed rows.' : 'No rows match the current filters.'}
+            {allRows.length === 0 ? 'All checks passed — no failed rows.' : 'No rows match the current filters.'}
           </div>
         )}
 
-        {filtered.length > 0 && (
+        {displayRows.length > 0 && (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
               <tr>
@@ -150,7 +156,7 @@ export const FailedRowsTab: React.FC<Props> = ({ apiClient, workspaceId, darkMod
               </tr>
             </thead>
             <tbody>
-              {filtered.map((row, i) => (
+              {displayRows.map((row, i) => (
                 <tr key={i} style={{ background: i % 2 === 0 ? t.bg : t.surface }}>
                   <td style={TD}>{row.table_name}</td>
                   <td style={TD}>{row.column_name}</td>
@@ -174,14 +180,14 @@ export const FailedRowsTab: React.FC<Props> = ({ apiClient, workspaceId, darkMod
       </div>
 
       {/* Pagination */}
-      {total > PAGE_SIZE && (
+      {filtered.length > PAGE_SIZE && (
         <div style={{ padding: '8px 16px', borderTop: `1px solid ${t.border}`, display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, flexShrink: 0, background: t.surface, color: t.subtext }}>
-          <button onClick={() => latestRun && loadRows(latestRun, page - 1)} disabled={page <= 1 || loading}
+          <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1 || loading}
             style={{ padding: '4px 10px', borderRadius: 4, border: `1px solid ${t.border}`, cursor: 'pointer', background: t.bg, color: t.text }}>
             ‹ Prev
           </button>
           <span>Page {page} of {totalPages}</span>
-          <button onClick={() => latestRun && loadRows(latestRun, page + 1)} disabled={page >= totalPages || loading}
+          <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages || loading}
             style={{ padding: '4px 10px', borderRadius: 4, border: `1px solid ${t.border}`, cursor: 'pointer', background: t.bg, color: t.text }}>
             Next ›
           </button>
