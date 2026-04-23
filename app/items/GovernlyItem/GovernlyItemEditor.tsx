@@ -46,13 +46,13 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'data-quality', labelKey: 'Nav_DataQuality', defaultLabel: 'Data Quality',   icon: <CheckmarkStarburst24Regular /> },
 ];
 
-// CSS-variable overrides so Fluent Button looks correct on the brand-blue header
+// CSS-variable overrides so Fluent Button looks correct on the dark header
 const HEADER_BTN_VARS = {
-  '--colorNeutralForeground1':         'white',
-  '--colorNeutralForeground1Hover':    'white',
-  '--colorNeutralForeground1Pressed':  'white',
-  '--colorNeutralBackground1Hover':    'rgba(255,255,255,0.15)',
-  '--colorNeutralBackground1Pressed':  'rgba(255,255,255,0.25)',
+  '--colorNeutralForeground1':         'rgba(255,255,255,0.85)',
+  '--colorNeutralForeground1Hover':    '#ffffff',
+  '--colorNeutralForeground1Pressed':  '#ffffff',
+  '--colorNeutralBackground1Hover':    'rgba(255,255,255,0.1)',
+  '--colorNeutralBackground1Pressed':  'rgba(255,255,255,0.18)',
 } as React.CSSProperties;
 
 const useStyles = makeStyles({
@@ -65,25 +65,25 @@ const useStyles = makeStyles({
   },
   header: {
     height: '48px',
-    backgroundColor: tokens.colorBrandBackground,
+    background: 'linear-gradient(90deg, #0f172a 0%, #1a2540 100%)',
     display: 'flex',
     alignItems: 'center',
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
     gap: tokens.spacingHorizontalXS,
     flexShrink: '0',
-    boxShadow: tokens.shadow4,
+    boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
   },
   headerIcon: {
-    color: tokens.colorNeutralForegroundOnBrand,
+    color: '#00b4e6',
     flexShrink: '0',
   },
   headerTitle: {
     fontWeight: tokens.fontWeightSemibold,
     fontSize: tokens.fontSizeBase400,
-    color: tokens.colorNeutralForegroundOnBrand,
+    color: '#ffffff',
     flex: '1',
-    letterSpacing: '0.2px',
+    letterSpacing: '0.5px',
   },
   body: {
     display: 'flex',
@@ -203,6 +203,13 @@ const GovernlyItemEditor: React.FC<GovernlyItemEditorProps> = ({ workloadClient 
       .then(result => { setDataAgentResult(result); setDataAgentStatus('done'); })
       .catch((err: any) => { setDataAgentError(err?.message ?? String(err)); setDataAgentStatus('error'); });
   }, [apiClient, workspaceId, dataAgentStatus]);
+
+  // Auto-dismiss success banner after 4 seconds
+  useEffect(() => {
+    if (dataAgentStatus !== 'done') return undefined;
+    const timer = setTimeout(() => setDataAgentStatus('idle'), 4000);
+    return () => clearTimeout(timer);
+  }, [dataAgentStatus]);
 
   const handleOpenWorkspace = useCallback(() => {
     if (!workspaceId) return;

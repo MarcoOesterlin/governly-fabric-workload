@@ -121,13 +121,23 @@ export const DashboardTab: React.FC<Props> = ({ darkMode, runs, summaries, loadi
     colors:  [t.accent],
     xaxis:   { categories: trendData.map(d => d.label), labels: { rotate: -30, style: { fontSize: '10px', colors: t.subtext } } },
     yaxis:   { min: 0, max: 100, labels: { formatter: (v: number) => `${v}%`, style: { colors: t.subtext } } },
-    tooltip: { y: { formatter: (v: number) => `${v}%` }, theme: darkMode ? 'dark' : 'light' },
-    grid:    { borderColor: t.border },
+    tooltip: {
+      custom: ({ series, seriesIndex, dataPointIndex }: any) => {
+        const val = series[seriesIndex][dataPointIndex];
+        const label = trendData[dataPointIndex]?.label ?? '';
+        const color = val >= 95 ? t.pass : val >= 70 ? t.warn : t.fail;
+        return `<div style="background:${t.surface};border:1px solid ${t.border};padding:8px 12px;border-radius:6px;color:${t.text};font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,0.5)">
+          <div style="font-weight:600;color:${t.subtext};margin-bottom:4px">${label}</div>
+          <div>Pass Rate: <strong style="color:${color}">${val}%</strong></div>
+        </div>`;
+      },
+    },
     annotations: {
       yaxis: [{ y: 95, borderColor: t.pass, borderWidth: 1, strokeDashArray: 4,
         label: { text: '95% target', style: { color: t.pass, background: 'transparent', fontSize: '10px', fontWeight: 600 } },
       }],
     },
+    grid: { borderColor: t.border },
   };
 
   // ── Gauge ──────────────────────────────────────────────────────────────────────
@@ -150,7 +160,6 @@ export const DashboardTab: React.FC<Props> = ({ darkMode, runs, summaries, loadi
   // ── Dimension bar ──────────────────────────────────────────────────────────────
   const dimBarOptions: ApexOptions = {
     chart:       { ...chartBase, type: 'bar' },
-    theme:       { mode: darkMode ? 'dark' : 'light' },
     plotOptions: { bar: { borderRadius: 3, horizontal: true, barHeight: '55%', distributed: true } },
     colors:      dimRates.map(r => r >= 95 ? t.pass : r >= 70 ? t.warn : t.fail),
     legend:      { show: false },
@@ -160,7 +169,17 @@ export const DashboardTab: React.FC<Props> = ({ darkMode, runs, summaries, loadi
       labels: { formatter: (v: number) => `${v}%`, style: { colors: t.subtext, fontSize: '11px' } },
     },
     yaxis:       { labels: { style: { colors: t.subtext, fontSize: '11px' } } },
-    tooltip:     { y: { formatter: (v: number) => `${v}%` }, theme: darkMode ? 'dark' : 'light' },
+    tooltip: {
+      custom: ({ series, seriesIndex, dataPointIndex, w }: any) => {
+        const val = series[seriesIndex][dataPointIndex];
+        const label = w.globals.labels[dataPointIndex] ?? dimKeys[dataPointIndex] ?? '';
+        const color = val >= 95 ? t.pass : val >= 70 ? t.warn : t.fail;
+        return `<div style="background:${t.surface};border:1px solid ${t.border};padding:8px 12px;border-radius:6px;color:${t.text};font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,0.5)">
+          <div style="font-weight:600;color:${t.subtext};margin-bottom:4px">${label}</div>
+          <div>Pass Rate: <strong style="color:${color}">${val}%</strong></div>
+        </div>`;
+      },
+    },
     dataLabels:  { enabled: true, formatter: (v: number) => `${v}%`, style: { fontSize: '11px', colors: ['#fff'] } },
     grid:        { borderColor: t.border },
   };
@@ -176,7 +195,7 @@ export const DashboardTab: React.FC<Props> = ({ darkMode, runs, summaries, loadi
         },
       },
     },
-    theme:       { mode: darkMode ? 'dark' : 'light' },
+    theme:       { mode: 'dark' },
     plotOptions: { bar: { borderRadius: 4, horizontal: true, barHeight: '60%', distributed: true } },
     colors:      tableStats.map(ts => ts.rate >= 95 ? t.pass : ts.rate >= 70 ? t.warn : t.fail),
     legend:      { show: false },
@@ -187,7 +206,20 @@ export const DashboardTab: React.FC<Props> = ({ darkMode, runs, summaries, loadi
     },
     yaxis:      { labels: { style: { colors: t.subtext, fontSize: '11px' }, maxWidth: 160 } },
     dataLabels: { enabled: true, formatter: (v: any) => `${Math.round(v)}%`, style: { fontSize: '11px', colors: ['#fff'] } },
-    tooltip:    { y: { formatter: (v: number) => `${v}%` }, theme: darkMode ? 'dark' : 'light' },
+    tooltip: {
+      custom: ({ series, seriesIndex, dataPointIndex, w }: any) => {
+        const val = series[seriesIndex][dataPointIndex];
+        const tbl = tableStats[dataPointIndex];
+        const label = w.globals.labels[dataPointIndex] ?? tbl?.name ?? '';
+        const color = val >= 95 ? t.pass : val >= 70 ? t.warn : t.fail;
+        return `<div style="background:${t.surface};border:1px solid ${t.border};padding:8px 12px;border-radius:6px;color:${t.text};font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,0.5)">
+          <div style="font-weight:600;color:${t.subtext};margin-bottom:4px">${label}</div>
+          <div>Health: <strong style="color:${color}">${val}%</strong></div>
+          ${tbl?.totalRows ? `<div style="margin-top:2px;color:${t.muted};font-size:11px">${tbl.totalRows.toLocaleString()} rows</div>` : ''}
+          <div style="margin-top:4px;font-size:10px;color:${t.muted}">Click to see failed rows →</div>
+        </div>`;
+      },
+    },
     grid:       { borderColor: t.border },
   };
   const tableBarSeries = [{ name: 'Pass Rate', data: tableStats.map(ts => ts.rate) }];
