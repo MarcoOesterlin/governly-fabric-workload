@@ -12,9 +12,10 @@ interface Props {
   summaries: Record<string, DqRunSummary>;
   loading: boolean;
   error: string | null;
+  onTableClick?: (tableName: string) => void;
 }
 
-export const DashboardTab: React.FC<Props> = ({ darkMode, runs, summaries, loading, error }) => {
+export const DashboardTab: React.FC<Props> = ({ darkMode, runs, summaries, loading, error, onTableClick }) => {
   const t = darkMode ? DARK_THEME : LIGHT_THEME;
   const [selectedRun, setSelectedRun] = useState<string>('');
 
@@ -166,7 +167,15 @@ export const DashboardTab: React.FC<Props> = ({ darkMode, runs, summaries, loadi
 
   // ── Table Health bar chart ─────────────────────────────────────────────────────
   const tableBarOptions: ApexOptions = {
-    chart:       { ...chartBase, type: 'bar' },
+    chart: {
+      ...chartBase, type: 'bar',
+      events: {
+        dataPointSelection: (_e: any, _ctx: any, cfg: any) => {
+          const tbl = tableStats[cfg.dataPointIndex];
+          if (tbl && onTableClick) onTableClick(tbl.name);
+        },
+      },
+    },
     theme:       { mode: darkMode ? 'dark' : 'light' },
     plotOptions: { bar: { borderRadius: 4, horizontal: true, barHeight: '60%', distributed: true } },
     colors:      tableStats.map(ts => ts.rate >= 95 ? t.pass : ts.rate >= 70 ? t.warn : t.fail),
