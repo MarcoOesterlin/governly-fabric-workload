@@ -77,7 +77,7 @@ export const DashboardTab: React.FC<Props> = ({ darkMode, runs, summaries, loadi
   const tablesHit     = new Set(results.map(r => r.table_name)).size;
   const totalRowsEval = results.reduce((sum, r) => sum + (r.total_rows ?? 0), 0);
   const gaugePassRate = overallPassRate ?? 0;
-  const gaugeColor    = gaugePassRate >= 0.95 ? t.pass : gaugePassRate >= 0.80 ? t.warn : t.fail;
+  const gaugeColor    = gaugePassRate >= 0.95 ? t.pass : gaugePassRate >= 0.70 ? t.warn : t.fail;
 
   const dimKeys  = Object.keys(byDimension);
   const dimRates = dimKeys.map(d => Math.round((byDimension[d].pass / byDimension[d].total) * 100));
@@ -150,7 +150,7 @@ export const DashboardTab: React.FC<Props> = ({ darkMode, runs, summaries, loadi
     chart:       { ...chartBase, type: 'bar' },
     theme:       { mode: darkMode ? 'dark' : 'light' },
     plotOptions: { bar: { borderRadius: 3, horizontal: true, barHeight: '55%', distributed: true } },
-    colors:      dimRates.map(r => r >= 95 ? t.pass : r >= 80 ? t.warn : t.fail),
+    colors:      dimRates.map(r => r >= 95 ? t.pass : r >= 70 ? t.warn : t.fail),
     legend:      { show: false },
     xaxis: {
       categories: dimKeys.map(d => DQ_DIMENSION_LABELS[d as DqDimension] ?? d),
@@ -168,7 +168,7 @@ export const DashboardTab: React.FC<Props> = ({ darkMode, runs, summaries, loadi
     chart:       { ...chartBase, type: 'bar' },
     theme:       { mode: darkMode ? 'dark' : 'light' },
     plotOptions: { bar: { borderRadius: 4, horizontal: true, barHeight: '60%', distributed: true } },
-    colors:      tableStats.map(ts => ts.rate >= 95 ? t.pass : ts.rate >= 80 ? t.warn : t.fail),
+    colors:      tableStats.map(ts => ts.rate >= 95 ? t.pass : ts.rate >= 70 ? t.warn : t.fail),
     legend:      { show: false },
     xaxis: {
       categories: tableStats.map(ts => ts.name),
@@ -326,7 +326,7 @@ export const DashboardTab: React.FC<Props> = ({ darkMode, runs, summaries, loadi
                     {topIssues.map((issue, i) => {
                       const score     = Math.round(issue.metric_value);
                       const threshold = Math.round(issue.threshold ?? 0);
-                      const scoreColor = score >= 80 ? t.warn : t.fail;
+                      const scoreColor = score >= 70 ? t.warn : t.fail;
                       return (
                         <tr key={i} style={{ borderBottom: `1px solid ${t.border}33` }}>
                           <td style={{ padding: '8px 12px', color: t.text, fontWeight: 500, whiteSpace: 'nowrap' as const, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis' }}>{issue.table_name}</td>
