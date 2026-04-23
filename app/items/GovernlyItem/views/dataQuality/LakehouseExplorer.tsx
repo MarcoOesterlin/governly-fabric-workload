@@ -17,14 +17,16 @@ const COL_STYLE: React.CSSProperties = {
 const HEADER: React.CSSProperties = {
   padding: '8px 12px', fontWeight: 600, fontSize: 12, color: '#555',
   borderBottom: '1px solid #e0e0e0', background: '#fafafa', flexShrink: 0,
+  display: 'flex', alignItems: 'center', gap: 6,
 };
-const ITEM = (active: boolean, checked?: boolean): React.CSSProperties => ({
+const ITEM = (active: boolean): React.CSSProperties => ({
   padding: '7px 12px', cursor: 'pointer', fontSize: 13,
   background: active ? '#e8f0fe' : 'transparent',
   color: active ? '#0f6cbd' : '#333',
   fontWeight: active ? 600 : 400,
   display: 'flex', alignItems: 'center', gap: 8,
   borderLeft: active ? '3px solid #0f6cbd' : '3px solid transparent',
+  minWidth: 0,
 });
 
 export const LakehouseExplorer: React.FC<Props> = ({ apiClient, workspaceId, selection, onSelectionChange, onLakehouseChange }) => {
@@ -38,16 +40,16 @@ export const LakehouseExplorer: React.FC<Props> = ({ apiClient, workspaceId, sel
 
   const [columns, setColumns] = useState<TableColumn[]>([]);
   const [colLoading, setColLoading] = useState(false);
+  const [selectingAll, setSelectingAll] = useState(false);
 
-  // Refs to access latest state values inside async callbacks
-  const selectionRef  = useRef(selection);
-  const justAddedRef  = useRef<string | null>(null);
+  const selectionRef = useRef(selection);
+  const justAddedRef = useRef<string | null>(null);
   useEffect(() => { selectionRef.current = selection; }, [selection]);
 
   useEffect(() => {
     setLhLoading(true);
     apiClient.listLakehouses(workspaceId)
-      .then(setLakehouses)
+      .then(all => setLakehouses(all.filter(lh => lh.displayName.toLowerCase() !== 'governly_dq')))
       .catch(console.error)
       .finally(() => setLhLoading(false));
   }, [apiClient, workspaceId]);
@@ -73,7 +75,6 @@ export const LakehouseExplorer: React.FC<Props> = ({ apiClient, workspaceId, sel
     apiClient.getTableSchema(workspaceId, selectedLh.id, tableName)
       .then(cols => {
         setColumns(cols);
-        // Auto-select all columns when this is a newly checked table
         if (justAddedRef.current === tableName) {
           justAddedRef.current = null;
           const allColNames = cols.map(c => c.name);
@@ -92,7 +93,9 @@ export const LakehouseExplorer: React.FC<Props> = ({ apiClient, workspaceId, sel
       onSelectionChange(selection.filter(s => s.tableName !== tableName));
     } else {
       justAddedRef.current = tableName;
-      onSelectionChange([...selection, { tableName, columns: [] }]);
+      const newSel = [...selection, { tableName, columns: [] }];
+      selectionRef.current = newSel;
+      onSelectionChange(newSel);
       focusTable(tableName);
     }
   }, [selection, onSelectionChange, focusTable]);
@@ -116,6 +119,31 @@ export const LakehouseExplorer: React.FC<Props> = ({ apiClient, workspaceId, sel
     }));
   }, [selection, onSelectionChange, columns]);
 
+  const selectAllTables = useCallback(async () => {
+    if (!selectedLh || tables.length === 0) return;
+    setSelectingAll(true);
+    try {
+      const results = await Promise.all(
+        tables.map(async t => {
+          const cols = await apiClient.getTableSchema(workspaceId, selectedLh.id, t.name);
+          return { tableName: t.name, columns: cols.map(c => c.name) };
+        })
+      );
+      const valid = results.filter(r => r.columns.length > 0);
+      onSelectionChange(valid);
+      if (valid.length > 0) {
+        const last = valid[valid.length - 1];
+        setFocusedTable(last.tableName);
+        const cols = await apiClient.getTableSchema(workspaceId, selectedLh.id, last.tableName);
+        setColumns(cols);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSelectingAll(false);
+    }
+  }, [selectedLh, tables, apiClient, workspaceId, onSelectionChange]);
+
   const focusedSelection = selection.find(s => s.tableName === focusedTable);
 
   return (
@@ -123,30 +151,50 @@ export const LakehouseExplorer: React.FC<Props> = ({ apiClient, workspaceId, sel
       {/* Lakehouses */}
       <div style={COL_STYLE}>
         <div style={HEADER}>Lakehouses</div>
-        {lhLoading && <div style={{ padding: 12, color: '#888' }}>Loading…</div>}
+        {lhLoading && <div style={{ padding: 12, color: '#888' }}>Loading...</div>}
         {lakehouses.map(lh => (
           <div key={lh.id} style={ITEM(selectedLh?.id === lh.id)} onClick={() => selectLakehouse(lh)}>
-            🏠 {lh.displayName}
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {lh.displayName}
+            </span>
           </div>
         ))}
       </div>
 
       {/* Tables */}
       <div style={COL_STYLE}>
-        <div style={HEADER}>Tables {selection.length > 0 && <span style={{ color: '#0f6cbd' }}>({selection.length} selected)</span>}</div>
-        {tblLoading && <div style={{ padding: 12, color: '#888' }}>Loading…</div>}
-        {!selectedLh && !tblLoading && <div style={{ padding: 12, color: '#aaa' }}>← Select a lakehouse</div>}
+        <div style={HEADER}>
+          <span style={{ flex: 1 }}>
+            Tables{selection.length > 0 && <span style={{ color: '#0f6cbd' }}> ({selection.length})</span>}
+          </span>
+          {selectedLh && tables.length > 0 && (
+            <span
+              style={{ color: '#0f6cbd', cursor: 'pointer', fontWeight: 400, fontSize: 11, flexShrink: 0 }}
+              onClick={selectAllTables}
+            >
+              {selectingAll ? 'Loading...' : 'Select all'}
+            </span>
+          )}
+        </div>
+        {tblLoading && <div style={{ padding: 12, color: '#888' }}>Loading...</div>}
+        {!selectedLh && !tblLoading && <div style={{ padding: 12, color: '#aaa' }}>Select a lakehouse</div>}
         {tables.map(t => {
           const checked = !!selection.find(s => s.tableName === t.name);
+          const colCount = selection.find(s => s.tableName === t.name)?.columns.length ?? 0;
           return (
-            <div key={t.name} style={{ ...ITEM(focusedTable === t.name, checked), justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }} onClick={() => { toggleTable(t.name); }}>
-                <input type="checkbox" checked={checked} onChange={() => toggleTable(t.name)} onClick={e => e.stopPropagation()} style={{ margin: 0 }} />
-                📋 {t.name}
+            <div key={t.name} style={{ ...ITEM(focusedTable === t.name), justifyContent: 'space-between' }}>
+              <div
+                style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}
+                onClick={() => toggleTable(t.name)}
+              >
+                <input type="checkbox" checked={checked} onChange={() => toggleTable(t.name)} onClick={e => e.stopPropagation()} style={{ margin: 0, flexShrink: 0 }} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {t.name}
+                </span>
               </div>
               {checked && (
-                <span style={{ fontSize: 11, color: '#0f6cbd', cursor: 'pointer' }} onClick={() => focusTable(t.name)}>
-                  {selection.find(s => s.tableName === t.name)?.columns.length ?? 0} cols ›
+                <span style={{ fontSize: 11, color: '#0f6cbd', cursor: 'pointer', flexShrink: 0, marginLeft: 4 }} onClick={() => focusTable(t.name)}>
+                  {colCount} cols
                 </span>
               )}
             </div>
@@ -157,25 +205,27 @@ export const LakehouseExplorer: React.FC<Props> = ({ apiClient, workspaceId, sel
       {/* Columns */}
       <div style={{ ...COL_STYLE, borderRight: 'none', flex: 1 }}>
         <div style={HEADER}>
-          Columns{focusedTable ? ` — ${focusedTable}` : ''}
+          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            Columns{focusedTable ? ` - ${focusedTable}` : ''}
+          </span>
           {focusedTable && focusedSelection && columns.length > 0 && (
             <span
-              style={{ marginLeft: 8, color: '#0f6cbd', cursor: 'pointer', fontWeight: 400, fontSize: 11 }}
+              style={{ color: '#0f6cbd', cursor: 'pointer', fontWeight: 400, fontSize: 11, flexShrink: 0 }}
               onClick={() => toggleAllColumns(focusedTable)}
             >
               {columns.every(c => focusedSelection.columns.includes(c.name)) ? 'Deselect all' : 'Select all'}
             </span>
           )}
         </div>
-        {colLoading && <div style={{ padding: 12, color: '#888' }}>Loading schema…</div>}
-        {!focusedTable && !colLoading && <div style={{ padding: 12, color: '#aaa' }}>← Select a table</div>}
+        {colLoading && <div style={{ padding: 12, color: '#888' }}>Loading schema...</div>}
+        {!focusedTable && !colLoading && <div style={{ padding: 12, color: '#aaa' }}>Select a table</div>}
         {focusedSelection && columns.map(col => {
           const checked = focusedSelection.columns.includes(col.name);
           return (
             <div key={col.name} style={ITEM(checked)} onClick={() => toggleColumn(focusedTable!, col.name)}>
-              <input type="checkbox" checked={checked} onChange={() => {}} style={{ margin: 0 }} />
-              <span style={{ flex: 1 }}>{col.name}</span>
-              <span style={{ fontSize: 11, color: '#888' }}>{col.dataType}</span>
+              <input type="checkbox" checked={checked} onChange={() => {}} style={{ margin: 0, flexShrink: 0 }} />
+              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{col.name}</span>
+              <span style={{ fontSize: 11, color: '#888', flexShrink: 0, marginLeft: 4 }}>{col.dataType}</span>
             </div>
           );
         })}

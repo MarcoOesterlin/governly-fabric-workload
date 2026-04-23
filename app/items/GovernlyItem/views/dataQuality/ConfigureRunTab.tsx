@@ -15,6 +15,8 @@ interface Props {
 
 type RunState = 'idle' | 'creating' | 'done' | 'error';
 
+interface LhConfig { lakehouse: Lakehouse; tables: DqTableSelection[] }
+
 export const ConfigureRunTab: React.FC<Props> = ({ apiClient, workspaceId, workloadClient, darkMode }) => {
   const t = darkMode ? DARK_THEME : LIGHT_THEME;
 
@@ -22,59 +24,140 @@ export const ConfigureRunTab: React.FC<Props> = ({ apiClient, workspaceId, workl
   const [tableSelection, setTableSelection] = useState<DqTableSelection[]>([]);
   const [dimensions, setDimensions] = useState<DqDimension[]>([...DQ_ACTIVE_DIMENSIONS]);
 
+  // Multi-lakehouse "Select All" mode
+  const [allLhConfigs, setAllLhConfigs] = useState<LhConfig[]>([]);
+  const [selectAllLoading, setSelectAllLoading] = useState(false);
+
   const [runState, setRunState] = useState<RunState>('idle');
   const [notebookUrl, setNotebookUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const canRun =
-    selectedLakehouse !== null &&
-    tableSelection.length > 0 &&
-    tableSelection.some(tb => tb.columns.length > 0) &&
-    dimensions.length > 0;
+  // In all-lakehouses mode, canRun if any lh has tables; otherwise check single selection
+  const canRun = allLhConfigs.length > 0
+    ? allLhConfigs.some(c => c.tables.some(tb => tb.columns.length > 0)) && dimensions.length > 0
+    : selectedLakehouse !== null &&
+      tableSelection.length > 0 &&
+      tableSelection.some(tb => tb.columns.length > 0) &&
+      dimensions.length > 0;
+
+  const handleSelectAllLakehouses = useCallback(async () => {
+    setSelectAllLoading(true);
+    setAllLhConfigs([]);
+    try {
+      const all = await apiClient.listLakehouses(workspaceId);
+      const filtered = all.filter(lh => lh.displayName.toLowerCase() !== 'governly_dq');
+      const configs = await Promise.all(filtered.map(async lh => {
+        const tbls = await apiClient.listLakehouseTables(workspaceId, lh.id);
+        const withCols = await Promise.all(tbls.map(async tb => {
+          const cols = await apiClient.getTableSchema(workspaceId, lh.id, tb.name);
+          return { tableName: tb.name, columns: cols.map(c => c.name) };
+        }));
+        return { lakehouse: lh, tables: withCols.filter(tb => tb.columns.length > 0) };
+      }));
+      setAllLhConfigs(configs.filter(c => c.tables.length > 0));
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    } finally {
+      setSelectAllLoading(false);
+    }
+  }, [apiClient, workspaceId]);
 
   const handleRun = useCallback(async () => {
-    if (!selectedLakehouse || !canRun) return;
+    if (!canRun) return;
     setRunState('creating');
     setError(null);
     setNotebookUrl(null);
 
-    const config: DqRunConfig = {
-      runId: uuidv4(),
-      workspaceId,
-      lakehouseId: selectedLakehouse.id,
-      lakehouseName: selectedLakehouse.displayName,
-      tables: tableSelection.filter(tb => tb.columns.length > 0),
-      dimensions,
-    };
+    const runId = uuidv4();
+    const lhConfigs: LhConfig[] = allLhConfigs.length > 0
+      ? allLhConfigs
+      : selectedLakehouse ? [{ lakehouse: selectedLakehouse, tables: tableSelection }] : [];
 
+    let lastUrl: string | null = null;
     try {
-      const result = await apiClient.createDqNotebook(config);
-      setNotebookUrl(result.webUrl);
+      for (const { lakehouse, tables } of lhConfigs) {
+        const config: DqRunConfig = {
+          runId,
+          workspaceId,
+          lakehouseId: lakehouse.id,
+          lakehouseName: lakehouse.displayName,
+          tables: tables.filter(tb => tb.columns.length > 0),
+          dimensions,
+        };
+        const result = await apiClient.createDqNotebook(config);
+        lastUrl = result.webUrl;
+      }
+      setNotebookUrl(lastUrl);
       setRunState('done');
     } catch (err: any) {
       setError(err?.message ?? String(err));
       setRunState('error');
     }
-  }, [apiClient, workspaceId, selectedLakehouse, tableSelection, dimensions, canRun]);
+  }, [apiClient, workspaceId, selectedLakehouse, tableSelection, allLhConfigs, dimensions, canRun]);
 
-  const totalColumns = tableSelection.reduce((sum, tb) => sum + tb.columns.length, 0);
+  const totalColumns = allLhConfigs.length > 0
+    ? allLhConfigs.reduce((sum, c) => sum + c.tables.reduce((s2, tb) => s2 + tb.columns.length, 0), 0)
+    : tableSelection.reduce((sum, tb) => sum + tb.columns.length, 0);
+
+  const selectionSummary = allLhConfigs.length > 0
+    ? `${allLhConfigs.length} lakehouses · ${allLhConfigs.reduce((s, c) => s + c.tables.length, 0)} tables · ${totalColumns} columns`
+    : selectedLakehouse
+      ? `${selectedLakehouse.displayName} · ${tableSelection.length} table${tableSelection.length !== 1 ? 's' : ''} · ${totalColumns} column${totalColumns !== 1 ? 's' : ''}`
+      : 'No data selected yet';
 
   return (
     <div style={{ display: 'flex', height: '100%', overflow: 'hidden', background: t.bg, color: t.text }}>
       {/* Left: cascading explorer */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRight: `1px solid ${t.border}` }}>
-        <div style={{ padding: '12px 16px', borderBottom: `1px solid ${t.border}`, fontWeight: 600, fontSize: 14, background: t.surface, color: t.text }}>
-          1. Select Data
+        <div style={{ padding: '12px 16px', borderBottom: `1px solid ${t.border}`, fontWeight: 600, fontSize: 14, background: t.surface, color: t.text, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span>1. Select Data</span>
+          <button
+            onClick={handleSelectAllLakehouses}
+            disabled={selectAllLoading}
+            style={{
+              marginLeft: 'auto', padding: '4px 12px', borderRadius: 4, border: `1px solid ${t.accent}`,
+              background: 'transparent', color: t.accent, fontWeight: 500, fontSize: 12,
+              cursor: selectAllLoading ? 'default' : 'pointer', opacity: selectAllLoading ? 0.6 : 1,
+            }}
+          >
+            {selectAllLoading ? 'Loading all...' : 'Select All Lakehouses'}
+          </button>
+          {allLhConfigs.length > 0 && (
+            <button
+              onClick={() => setAllLhConfigs([])}
+              style={{ padding: '4px 8px', borderRadius: 4, border: `1px solid ${t.border}`, background: 'transparent', color: t.subtext, fontSize: 11, cursor: 'pointer' }}
+            >
+              Clear
+            </button>
+          )}
         </div>
-        <div style={{ flex: 1, overflow: 'hidden' }}>
-          <LakehouseExplorer
-            apiClient={apiClient}
-            workspaceId={workspaceId}
-            selection={tableSelection}
-            onSelectionChange={setTableSelection}
-            onLakehouseChange={setSelectedLakehouse}
-          />
-        </div>
+        {allLhConfigs.length > 0 ? (
+          <div style={{ flex: 1, overflowY: 'auto', padding: 16, background: t.bg }}>
+            <div style={{ fontSize: 13, color: t.text, fontWeight: 500, marginBottom: 12 }}>
+              All Lakehouses Selected
+            </div>
+            {allLhConfigs.map(({ lakehouse, tables }) => (
+              <div key={lakehouse.id} style={{ marginBottom: 12, padding: 12, background: t.surface, borderRadius: 6, border: `1px solid ${t.border}` }}>
+                <div style={{ fontWeight: 600, fontSize: 13, color: t.text, marginBottom: 6 }}>{lakehouse.displayName}</div>
+                {tables.map(tb => (
+                  <div key={tb.tableName} style={{ fontSize: 12, color: t.subtext, padding: '2px 0' }}>
+                    {tb.tableName} — {tb.columns.length} columns
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ flex: 1, overflow: 'hidden' }}>
+            <LakehouseExplorer
+              apiClient={apiClient}
+              workspaceId={workspaceId}
+              selection={tableSelection}
+              onSelectionChange={setTableSelection}
+              onLakehouseChange={setSelectedLakehouse}
+            />
+          </div>
+        )}
       </div>
 
       {/* Right: dimensions + run */}
@@ -89,9 +172,7 @@ export const ConfigureRunTab: React.FC<Props> = ({ apiClient, workspaceId, workl
         {/* Run panel */}
         <div style={{ padding: 16, borderTop: `1px solid ${t.border}`, background: t.surface }}>
           <div style={{ fontSize: 12, color: t.subtext, marginBottom: 12 }}>
-            {selectedLakehouse
-              ? <><strong style={{ color: t.text }}>{selectedLakehouse.displayName}</strong> · {tableSelection.length} table{tableSelection.length !== 1 ? 's' : ''} · {totalColumns} column{totalColumns !== 1 ? 's' : ''} · {dimensions.length} dimension{dimensions.length !== 1 ? 's' : ''}</>
-              : 'No data selected yet'}
+            {selectionSummary}
           </div>
 
           <button

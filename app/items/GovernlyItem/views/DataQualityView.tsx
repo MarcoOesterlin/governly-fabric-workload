@@ -15,15 +15,15 @@ interface Props {
 type TabKey = 'configure' | 'dashboard' | 'failed';
 
 const TABS: { key: TabKey; label: string }[] = [
-  { key: 'configure',  label: 'Configure & Run' },
   { key: 'dashboard',  label: 'Dashboard' },
   { key: 'failed',     label: 'Failed Rows' },
+  { key: 'configure',  label: 'Configure & Run' },
 ];
 
 const STORAGE_KEY = 'governly_dq_dark_mode';
 
 export const DataQualityView: React.FC<Props> = ({ apiClient, workspaceId, workloadClient }) => {
-  const [activeTab, setActiveTab] = useState<TabKey>('configure');
+  const [activeTab, setActiveTab] = useState<TabKey>('dashboard');
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
     return stored === null ? true : stored === 'true';

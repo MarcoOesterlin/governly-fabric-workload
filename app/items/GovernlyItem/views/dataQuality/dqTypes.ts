@@ -111,16 +111,16 @@ export interface DqTheme {
 }
 
 export const DARK_THEME: DqTheme = {
-  bg:      '#13192b',
-  surface: '#1e2540',
-  border:  '#2d3561',
-  accent:  '#0ea5e9',
-  pass:    '#10b981',
-  fail:    '#f87171',
-  warn:    '#f59e0b',
-  text:    '#f1f5f9',
-  subtext: '#94a3b8',
-  muted:   '#475569',
+  bg:      '#0e1015',
+  surface: '#181d2e',
+  border:  '#252d45',
+  accent:  '#00b4e6',
+  pass:    '#00cc72',
+  fail:    '#f5405a',
+  warn:    '#f5a623',
+  text:    '#f2f2f2',
+  subtext: '#c9d1d9',
+  muted:   '#3a4464',
 };
 
 export const LIGHT_THEME: DqTheme = {
