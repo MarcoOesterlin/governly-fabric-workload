@@ -14,39 +14,31 @@ interface Props {
   error: string | null;
 }
 
-interface TrendPoint {
-  meta: DqRunMeta;
-  passRate: number;
-  label: string;
-}
-
 export const DashboardTab: React.FC<Props> = ({ darkMode, runs, summaries, loading, error }) => {
   const t = darkMode ? DARK_THEME : LIGHT_THEME;
-
   const [selectedRun, setSelectedRun] = useState<string>('');
 
-  // Set initial selected run when data arrives
   useEffect(() => {
     if (runs.length > 0 && !selectedRun) setSelectedRun(runs[0].run_id);
   }, [runs]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const summaryMap = summaries;
-  const summary: DqRunSummary | null = summaryMap[selectedRun] ?? null;
+  const summary: DqRunSummary | null = summaries[selectedRun] ?? null;
   const results: DqResultRow[] = summary?.results ?? [];
 
-  const trendData: TrendPoint[] = useMemo(() => {
-    return [...runs].reverse().map(meta => ({
+  // ── Trend ──────────────────────────────────────────────────────────────────────
+  const trendData = useMemo(() =>
+    [...runs].reverse().map(meta => ({
       meta,
       passRate: (() => {
-        const s = summaryMap[meta.run_id];
+        const s = summaries[meta.run_id];
         if (!s || s.results.length === 0) return 0;
         return Math.round(s.results.filter(r => r.passed).length / s.results.length * 100);
       })(),
-      label: `${meta.year}-${meta.month}-${meta.day} ${meta.run_id.slice(0,2)}:${meta.run_id.slice(2,4)}`,
-    }));
-  }, [runs, summaryMap]);
+      label: `${meta.year}-${meta.month}-${meta.day} ${meta.run_id.slice(0, 2)}:${meta.run_id.slice(2, 4)}`,
+    }))
+  , [runs, summaries]);
 
-  // ── Derived metrics ──────────────────────────────────────────────────────────
+  // ── Aggregations ───────────────────────────────────────────────────────────────
   const overallPassRate = useMemo(() => {
     if (!results.length) return null;
     return results.filter(r => r.passed).length / results.length;
@@ -62,61 +54,52 @@ export const DashboardTab: React.FC<Props> = ({ darkMode, runs, summaries, loadi
     return map;
   }, [results]);
 
-  const heatmapData = useMemo(() => {
+  const tableStats = useMemo(() => {
     const tables = [...new Set(results.map(r => r.table_name))];
-    const dims   = [...new Set(results.map(r => r.dimension))] as DqDimension[];
-    return dims.map(dim => ({
-      name: DQ_DIMENSION_LABELS[dim] ?? dim,
-      data: tables.map(tbl => {
-        const row = results.find(r => r.table_name === tbl && r.dimension === dim);
-        return { x: tbl, y: row ? Math.round(row.metric_value) : null };
-      }),
-    }));
+    return tables
+      .map(tbl => {
+        const tr = results.filter(r => r.table_name === tbl);
+        const rate = Math.round(tr.filter(r => r.passed).length / tr.length * 100);
+        const totalRows = tr.reduce((s, r) => s + (r.total_rows ?? 0), 0);
+        return { name: tbl, rate, totalRows };
+      })
+      .sort((a, b) => a.rate - b.rate);
   }, [results]);
 
-  // ── Shared chart config ───────────────────────────────────────────────────────
-  const chartTheme = {
-    background: 'transparent',
-    foreColor: t.subtext,
-    fontFamily: 'inherit',
-    toolbar: { show: false },
-  };
+  const topIssues = useMemo(() =>
+    results.filter(r => !r.passed).sort((a, b) => a.metric_value - b.metric_value).slice(0, 8)
+  , [results]);
 
-  const dimKeys = Object.keys(byDimension);
+  // ── KPI values ─────────────────────────────────────────────────────────────────
+  const totalRules    = results.length;
+  const passedRules   = results.filter(r => r.passed).length;
+  const failedRules   = totalRules - passedRules;
+  const tablesHit     = new Set(results.map(r => r.table_name)).size;
+  const totalRowsEval = results.reduce((sum, r) => sum + (r.total_rows ?? 0), 0);
+  const gaugePassRate = overallPassRate ?? 0;
+  const gaugeColor    = gaugePassRate >= 0.95 ? t.pass : gaugePassRate >= 0.80 ? t.warn : t.fail;
+
+  const dimKeys  = Object.keys(byDimension);
   const dimRates = dimKeys.map(d => Math.round((byDimension[d].pass / byDimension[d].total) * 100));
 
-  const barOptions: ApexOptions = {
-    chart: { ...chartTheme, type: 'bar' },
-    theme: { mode: darkMode ? 'dark' : 'light' },
-    plotOptions: { bar: { borderRadius: 4, horizontal: true, barHeight: '60%' } },
-    colors: dimRates.map(r => r >= 95 ? t.pass : r >= 80 ? t.warn : t.fail),
-    xaxis: { categories: dimKeys.map(d => DQ_DIMENSION_LABELS[d as DqDimension] ?? d), min: 0, max: 100, labels: { formatter: (v: number) => `${v}%`, style: { colors: t.subtext } } },
-    yaxis: { labels: { style: { colors: t.subtext } } },
-    tooltip: { y: { formatter: (v: number) => `${v}%` }, theme: darkMode ? 'dark' : 'light' },
-    dataLabels: { enabled: true, formatter: (v: number) => `${v}%`, style: { fontSize: '11px' } },
-    grid: { borderColor: t.border },
+  const selectedMeta = runs.find(r => r.run_id === selectedRun);
+  const runLabel = selectedMeta
+    ? `${selectedMeta.year}-${selectedMeta.month}-${selectedMeta.day}  ${selectedMeta.run_id.slice(0, 2)}:${selectedMeta.run_id.slice(2, 4)} UTC`
+    : '';
+  const sourceLakehouseName = summary?.source_lakehouse_name ?? summary?.source_lakehouse_id ?? '';
+
+  // ── Shared chart base ──────────────────────────────────────────────────────────
+  const chartBase = {
+    background: 'transparent',
+    foreColor:  t.subtext,
+    fontFamily: 'inherit',
+    toolbar:    { show: false },
   };
 
-  const barSeries = [{ name: 'Pass Rate', data: dimRates }];
-
-  const gaugePassRate = overallPassRate ?? 0;
-  const gaugeColor = gaugePassRate >= 0.95 ? t.pass : gaugePassRate >= 0.80 ? t.warn : t.fail;
-
-  const gaugeOptions: ApexOptions = {
-    chart: { ...chartTheme, type: 'radialBar' },
-    theme: { mode: darkMode ? 'dark' : 'light' },
-    plotOptions: { radialBar: { hollow: { size: '55%' }, dataLabels: {
-      name: { show: true, offsetY: -10, color: t.subtext, fontSize: '13px' },
-      value: { fontSize: '28px', fontWeight: 700, color: gaugeColor, formatter: (v: number) => `${v}%` },
-    }}},
-    colors: [gaugeColor],
-    labels: ['Overall Pass Rate'],
-  };
-
+  // ── Trend chart ────────────────────────────────────────────────────────────────
   const trendOptions: ApexOptions = {
     chart: {
-      ...chartTheme,
-      type: 'area',
+      ...chartBase, type: 'area',
       events: {
         dataPointSelection: (_e: any, _ctx: any, cfg: any) => {
           const pt = trendData[cfg.dataPointIndex];
@@ -124,155 +107,244 @@ export const DashboardTab: React.FC<Props> = ({ darkMode, runs, summaries, loadi
         },
       },
     },
-    theme: { mode: darkMode ? 'dark' : 'light' },
-    stroke: { curve: 'smooth', width: 2 },
-    fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.05 } },
+    theme:   { mode: darkMode ? 'dark' : 'light' },
+    stroke:  { curve: 'smooth', width: 2 },
+    fill:    { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.35, opacityTo: 0.03 } },
     markers: {
-      size: trendData.map(pt => pt.meta.run_id === selectedRun ? 8 : 4),
-      colors: trendData.map(pt => pt.meta.run_id === selectedRun ? t.accent : t.surface),
+      size:         trendData.map(pt => pt.meta.run_id === selectedRun ? 8 : 4),
+      colors:       trendData.map(pt => pt.meta.run_id === selectedRun ? t.accent : t.surface),
       strokeColors: t.accent,
-      strokeWidth: 2,
+      strokeWidth:  2,
     },
-    colors: [t.accent],
-    xaxis: { categories: trendData.map(d => d.label), labels: { rotate: -30, style: { fontSize: '10px', colors: t.subtext } } },
-    yaxis: { min: 0, max: 100, labels: { formatter: (v: number) => `${v}%`, style: { colors: t.subtext } } },
+    colors:  [t.accent],
+    xaxis:   { categories: trendData.map(d => d.label), labels: { rotate: -30, style: { fontSize: '10px', colors: t.subtext } } },
+    yaxis:   { min: 0, max: 100, labels: { formatter: (v: number) => `${v}%`, style: { colors: t.subtext } } },
     tooltip: { y: { formatter: (v: number) => `${v}%` }, theme: darkMode ? 'dark' : 'light' },
-    grid: { borderColor: t.border },
+    grid:    { borderColor: t.border },
+    annotations: {
+      yaxis: [{ y: 95, borderColor: t.pass, borderWidth: 1, strokeDashArray: 4,
+        label: { text: '95% target', style: { color: t.pass, background: 'transparent', fontSize: '10px', fontWeight: 600 } },
+      }],
+    },
   };
 
-  const trendSeries = [{ name: 'Overall Pass Rate', data: trendData.map(d => d.passRate) }];
-
-  const heatOptions: ApexOptions = {
-    chart: { ...chartTheme, type: 'heatmap' },
+  // ── Gauge ──────────────────────────────────────────────────────────────────────
+  const gaugeOptions: ApexOptions = {
+    chart: { ...chartBase, type: 'radialBar' },
     theme: { mode: darkMode ? 'dark' : 'light' },
-    dataLabels: { enabled: true, style: { fontSize: '11px' }, formatter: (v: number) => v != null ? `${v}%` : 'N/A' },
-    plotOptions: { heatmap: { shadeIntensity: 0.5, colorScale: { ranges: [
-      { from: 0,  to: 79,  color: t.fail, name: 'Poor' },
-      { from: 80, to: 94,  color: t.warn, name: 'Moderate' },
-      { from: 95, to: 100, color: t.pass, name: 'Good' },
-    ]}}},
-    xaxis: { type: 'category', labels: { style: { colors: t.subtext } } },
-    yaxis: { labels: { style: { colors: t.subtext } } },
-    grid: { borderColor: t.border },
-    tooltip: { y: { formatter: (v: number) => v != null ? `${v}%` : 'N/A' }, theme: darkMode ? 'dark' : 'light' },
+    plotOptions: { radialBar: {
+      startAngle: -135, endAngle: 135,
+      hollow: { size: '60%' },
+      track:  { background: t.border, strokeWidth: '100%' },
+      dataLabels: {
+        name:  { show: true, offsetY: -10, color: t.subtext, fontSize: '12px' },
+        value: { fontSize: '30px', fontWeight: 700, color: gaugeColor, formatter: (v: number) => `${v}%` },
+      },
+    }},
+    colors: [gaugeColor],
+    labels: ['Overall'],
   };
 
-  // ── Score cards ───────────────────────────────────────────────────────────────
-  const totalRules    = results.length;
-  const passedRules   = results.filter(r => r.passed).length;
-  const failedRules   = totalRules - passedRules;
-  const tablesHit     = new Set(results.map(r => r.table_name)).size;
-  const totalRowsEval = results.reduce((sum, r) => sum + (r.total_rows ?? 0), 0);
+  // ── Dimension bar ──────────────────────────────────────────────────────────────
+  const dimBarOptions: ApexOptions = {
+    chart:       { ...chartBase, type: 'bar' },
+    theme:       { mode: darkMode ? 'dark' : 'light' },
+    plotOptions: { bar: { borderRadius: 3, horizontal: true, barHeight: '55%', distributed: true } },
+    colors:      dimRates.map(r => r >= 95 ? t.pass : r >= 80 ? t.warn : t.fail),
+    legend:      { show: false },
+    xaxis: {
+      categories: dimKeys.map(d => DQ_DIMENSION_LABELS[d as DqDimension] ?? d),
+      min: 0, max: 100,
+      labels: { formatter: (v: number) => `${v}%`, style: { colors: t.subtext, fontSize: '11px' } },
+    },
+    yaxis:       { labels: { style: { colors: t.subtext, fontSize: '11px' } } },
+    tooltip:     { y: { formatter: (v: number) => `${v}%` }, theme: darkMode ? 'dark' : 'light' },
+    dataLabels:  { enabled: true, formatter: (v: number) => `${v}%`, style: { fontSize: '11px', colors: ['#fff'] } },
+    grid:        { borderColor: t.border },
+  };
 
-  const selectedMeta = runs.find(r => r.run_id === selectedRun);
-  const runLabel = selectedMeta
-    ? `${selectedMeta.year}-${selectedMeta.month}-${selectedMeta.day} ${selectedMeta.run_id.slice(0,2)}:${selectedMeta.run_id.slice(2,4)}:${selectedMeta.run_id.slice(4,6)} UTC`
-    : '';
-  const sourceLakehouseName = summary?.source_lakehouse_name ?? summary?.source_lakehouse_id ?? '';
+  // ── Treemap (table health) ─────────────────────────────────────────────────────
+  const treemapColors = tableStats.map(ts => ts.rate >= 95 ? t.pass : ts.rate >= 80 ? t.warn : t.fail);
+  const treemapOptions: ApexOptions = {
+    chart:   { ...chartBase, type: 'treemap' },
+    theme:   { mode: darkMode ? 'dark' : 'light' },
+    colors:  treemapColors,
+    legend:  { show: false },
+    dataLabels: {
+      enabled: true,
+      style:   { fontSize: '12px', fontFamily: 'inherit', fontWeight: 600, colors: ['#fff'] },
+      formatter: (text: string, op: any) => [`${text}`, `${tableStats[op.dataPointIndex]?.rate ?? 0}%`],
+    },
+    plotOptions: { treemap: { distributed: true, enableShades: false } },
+    tooltip: {
+      custom: ({ dataPointIndex }: any) => {
+        const ts = tableStats[dataPointIndex];
+        if (!ts) return '';
+        const color = ts.rate >= 95 ? t.pass : ts.rate >= 80 ? t.warn : t.fail;
+        return `<div style="padding:8px 12px;font-size:12px;background:${t.surface};border:1px solid ${t.border};border-radius:4px;color:${t.text}">
+          <strong>${ts.name}</strong><br/>
+          Pass rate: <span style="color:${color};font-weight:700">${ts.rate}%</span><br/>
+          Rows: ${ts.totalRows.toLocaleString()}
+        </div>`;
+      },
+      theme: darkMode ? 'dark' : 'light',
+    },
+  };
+  const treemapSeries = [{ data: tableStats.map(ts => ({ x: ts.name, y: Math.max(ts.totalRows || 1, 1) })) }];
 
-  const card = (label: string, value: string | number, accent: string) => (
-    <div key={label} style={{
-      flex: '1 1 110px', minWidth: 110,
-      background: t.surface,
-      border: `1px solid ${t.border}`,
-      borderLeft: `3px solid ${accent}`,
-      borderRadius: 8,
-      padding: '14px 16px',
-    }}>
-      <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1, color: t.subtext, marginBottom: 8 }}>{label}</div>
-      <div style={{ fontSize: 26, fontWeight: 700, color: accent }}>{value}</div>
-    </div>
-  );
-
-  const panel = (children: React.ReactNode, extraStyle?: React.CSSProperties) => (
-    <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 8, padding: 16, ...extraStyle }}>
+  // ── UI helpers ─────────────────────────────────────────────────────────────────
+  const panel = (children: React.ReactNode, style?: React.CSSProperties) => (
+    <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 8, padding: 16, ...style }}>
       {children}
     </div>
   );
 
-  const sectionTitle = (title: string, subtitle?: string) => (
-    <div style={{ fontSize: 13, fontWeight: 600, color: t.text, marginBottom: 8 }}>
+  const panelTitle = (title: string, sub?: string) => (
+    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.8px', color: t.subtext, marginBottom: 12 }}>
       {title}
-      {subtitle && <span style={{ fontWeight: 400, fontSize: 11, color: t.muted, marginLeft: 8 }}>{subtitle}</span>}
+      {sub && <span style={{ fontWeight: 400, textTransform: 'none' as const, letterSpacing: 0, fontSize: 11, marginLeft: 8, opacity: 0.7 }}>{sub}</span>}
+    </div>
+  );
+
+  const kpiCard = (label: string, value: string | number, color: string) => (
+    <div key={label} style={{
+      flex: '1 1 100px', minWidth: 90,
+      background: t.surface, border: `1px solid ${t.border}`,
+      borderTop: `3px solid ${color}`, borderRadius: 8, padding: '12px 14px',
+    }}>
+      <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.8px', color: t.subtext, marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 26, fontWeight: 700, color, lineHeight: 1 }}>{value}</div>
     </div>
   );
 
   return (
     <div style={{ padding: 20, overflowY: 'auto', height: '100%', boxSizing: 'border-box', background: t.bg, color: t.text }}>
-      {/* Controls */}
+
+      {/* Run selector bar */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
         <select
           value={selectedRun}
           onChange={e => setSelectedRun(e.target.value)}
           disabled={runs.length === 0}
-          style={{ padding: '6px 10px', borderRadius: 4, border: `1px solid ${t.border}`, fontSize: 13, background: t.surface, color: t.text }}
+          style={{ padding: '6px 10px', borderRadius: 4, border: `1px solid ${t.border}`, fontSize: 13, background: t.surface, color: t.text, outline: 'none' }}
         >
-          <option value="">— Select Run —</option>
+          <option value="">Select a run</option>
           {runs.map(r => (
             <option key={r.run_id} value={r.run_id}>
-              {`${r.year}-${r.month}-${r.day} ${r.run_id.slice(0,2)}:${r.run_id.slice(2,4)} UTC`}
+              {`${r.year}-${r.month}-${r.day}  ${r.run_id.slice(0, 2)}:${r.run_id.slice(2, 4)} UTC`}
             </option>
           ))}
         </select>
 
-        {loading && <span style={{ color: t.subtext, fontSize: 13 }}>Loading…</span>}
-        {error && <span style={{ color: t.fail, fontSize: 13 }}>{error}</span>}
-        {runLabel && !loading && <span style={{ fontSize: 12, color: t.subtext, marginLeft: 4 }}>{runLabel}</span>}
         {sourceLakehouseName && !loading && (
-          <span style={{ fontSize: 12, color: t.accent, marginLeft: 4, padding: '2px 8px', background: t.surface, border: `1px solid ${t.border}`, borderRadius: 4 }}>
+          <span style={{ fontSize: 12, padding: '3px 10px', background: `${t.accent}22`, border: `1px solid ${t.accent}44`, borderRadius: 20, color: t.accent, fontWeight: 500 }}>
             {sourceLakehouseName}
           </span>
         )}
+        {loading && <span style={{ color: t.subtext, fontSize: 13 }}>Loading...</span>}
+        {error   && <span style={{ color: t.fail,    fontSize: 13 }}>{error}</span>}
+        {runLabel && !loading && <span style={{ fontSize: 12, color: t.subtext, marginLeft: 'auto' }}>{runLabel}</span>}
       </div>
 
-      {/* Historical trend */}
+      {/* Trend chart */}
       {trendData.length > 0 && (
         <div style={{ marginBottom: 16 }}>
           {panel(<>
-            {sectionTitle('Historical Pass Rate', 'Click a point to view that run')}
-            <ReactApexChart type="area" options={trendOptions} series={trendSeries} height={160} />
+            {panelTitle('Quality Trend', 'Click a point to inspect that run')}
+            <ReactApexChart type="area" options={trendOptions} series={[{ name: 'Pass Rate', data: trendData.map(d => d.passRate) }]} height={150} />
           </>)}
         </div>
       )}
 
       {!summary && !loading && (
-        <div style={{ color: t.muted, textAlign: 'center', marginTop: 60, fontSize: 14 }}>
-          Select a completed run to view results.
-          <div style={{ fontSize: 12, marginTop: 8, color: t.subtext }}>Run a notebook from the Configure tab first.</div>
+        <div style={{ color: t.subtext, textAlign: 'center', marginTop: 60, fontSize: 14 }}>
+          No run selected.
+          <div style={{ fontSize: 12, marginTop: 8, color: t.muted }}>Run a notebook from Configure &amp; Run first.</div>
         </div>
       )}
 
-      {summary && results.length > 0 && (
-        <>
-          {/* KPI cards */}
-          <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-            {card('Total Checks',      totalRules,                     t.accent)}
-            {card('Passed',            passedRules,                    t.pass)}
-            {card('Failed',            failedRules,                    failedRules > 0 ? t.fail : t.pass)}
-            {card('Tables',            tablesHit,                      t.accent)}
-            {card('Records Evaluated', totalRowsEval.toLocaleString(), t.accent)}
-          </div>
+      {summary && results.length > 0 && (<>
 
-          {/* Gauge + Bar side by side */}
-          <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
-            <div style={{ flex: '0 0 220px', background: t.surface, border: `1px solid ${t.border}`, borderRadius: 8, padding: 12 }}>
-              <ReactApexChart type="radialBar" options={gaugeOptions} series={[Math.round(gaugePassRate * 100)]} height={220} />
-            </div>
-            <div style={{ flex: 1, minWidth: 280, background: t.surface, border: `1px solid ${t.border}`, borderRadius: 8, padding: 12 }}>
-              {sectionTitle('Pass Rate by Dimension')}
-              <ReactApexChart type="bar" options={barOptions} series={barSeries} height={200} />
-            </div>
-          </div>
+        {/* KPI cards */}
+        <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+          {kpiCard('Score',         `${Math.round(gaugePassRate * 100)}%`, gaugeColor)}
+          {kpiCard('Checks',        totalRules,                            t.accent)}
+          {kpiCard('Passed',        passedRules,                           t.pass)}
+          {kpiCard('Failed',        failedRules,                           failedRules > 0 ? t.fail : t.pass)}
+          {kpiCard('Tables',        tablesHit,                             t.accent)}
+          {kpiCard('Rows Scanned',  totalRowsEval.toLocaleString(),        t.accent)}
+        </div>
 
-          {/* Heatmap */}
-          {heatmapData.length > 0 && heatmapData[0].data.length > 0 && (
-            panel(<>
-              {sectionTitle('Pass Rate Heatmap', 'Table × Dimension')}
-              <ReactApexChart type="heatmap" options={heatOptions} series={heatmapData} height={Math.max(150, heatmapData.length * 45 + 60)} />
-            </>)
+        {/* Gauge + Dimension pass rates */}
+        <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
+          {panel(
+            <ReactApexChart type="radialBar" options={gaugeOptions} series={[Math.round(gaugePassRate * 100)]} height={220} />,
+            { flex: '0 0 210px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 8 }
           )}
-        </>
-      )}
+          {panel(<>
+            {panelTitle('Pass Rate by Dimension')}
+            {dimKeys.length > 0
+              ? <ReactApexChart type="bar" options={dimBarOptions} series={[{ name: 'Pass Rate', data: dimRates }]} height={Math.max(160, dimKeys.length * 38)} />
+              : <div style={{ color: t.subtext, fontSize: 13 }}>No dimension data</div>
+            }
+          </>, { flex: 1, minWidth: 260 })}
+        </div>
+
+        {/* Table treemap + Top Issues */}
+        <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
+
+          {tableStats.length > 0 && panel(<>
+            {panelTitle('Table Health', 'Size = rows scanned · color = pass rate')}
+            <ReactApexChart
+              type="treemap"
+              options={treemapOptions}
+              series={treemapSeries}
+              height={Math.min(320, Math.max(180, tableStats.length * 55))}
+            />
+          </>, { flex: 1, minWidth: 300 })}
+
+          {panel(<>
+            {panelTitle(
+              topIssues.length > 0 ? 'Top Issues' : 'No Issues',
+              topIssues.length > 0 ? `${topIssues.length} failing check${topIssues.length !== 1 ? 's' : ''}` : undefined
+            )}
+            {topIssues.length === 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px 0', gap: 8 }}>
+                <div style={{ fontSize: 28 }}>✓</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: t.pass }}>All checks passing</div>
+                <div style={{ fontSize: 12, color: t.subtext }}>No failing rules in this run</div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {topIssues.map((issue, i) => {
+                  const score = Math.round(issue.metric_value);
+                  const color = score >= 80 ? t.warn : t.fail;
+                  const pct = Math.max(0, Math.min(100, score));
+                  return (
+                    <div key={i} style={{ padding: '8px 10px', background: t.bg, borderRadius: 6, border: `1px solid ${t.border}` }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 4 }}>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: t.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                          {issue.table_name}<span style={{ color: t.subtext, fontWeight: 400 }}>.{issue.column_name}</span>
+                        </span>
+                        <span style={{ fontSize: 13, fontWeight: 700, color, flexShrink: 0 }}>{score}%</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ flex: 1, height: 4, background: t.border, borderRadius: 2, overflow: 'hidden' }}>
+                          <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 2 }} />
+                        </div>
+                        <span style={{ fontSize: 10, color: t.subtext, flexShrink: 0 }}>
+                          {DQ_DIMENSION_LABELS[issue.dimension] ?? issue.dimension}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>, { flex: '0 0 310px', minWidth: 260 })}
+
+        </div>
+      </>)}
     </div>
   );
 };
