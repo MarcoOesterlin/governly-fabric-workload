@@ -49,9 +49,11 @@ export const DataQualityView: React.FC<Props> = ({ apiClient, workspaceId, workl
 
   const t = darkMode ? DARK_THEME : LIGHT_THEME;
 
-  // Tab bar is always light; only content area follows darkMode
+  // Tab bar follows darkMode on dashboard/failed tabs
   const tabBg = activeTab === 'configure' ? '#ffffff' : t.surface;
   const tabBorder = activeTab === 'configure' ? '#e2e8f0' : t.border;
+  const tabActiveColor   = darkMode && activeTab !== 'configure' ? t.accent : '#0f6cbd';
+  const tabInactiveColor = darkMode && activeTab !== 'configure' ? t.text   : '#555';
 
   if (!workspaceId) {
     return (
@@ -74,13 +76,13 @@ export const DataQualityView: React.FC<Props> = ({ apiClient, workspaceId, workl
               style={{
                 padding: '10px 20px',
                 border: 'none',
-                borderBottom: active ? `2px solid #0f6cbd` : '2px solid transparent',
+                borderBottom: active ? `2px solid ${tabActiveColor}` : '2px solid transparent',
                 marginBottom: -2,
                 background: 'transparent',
                 cursor: 'pointer',
                 fontSize: 13,
                 fontWeight: active ? 600 : 400,
-                color: active ? '#0f6cbd' : '#555',
+                color: active ? tabActiveColor : tabInactiveColor,
               }}
             >
               {tab.label}
