@@ -336,7 +336,26 @@ async function updateNotebookDefinition(workspaceId, notebookId, payload, token)
 const preloadCache = new Map(); // workspaceId → { data, expiry }
 const PRELOAD_CACHE_TTL = 5 * 60 * 1000;
 
-// ── Route registration ────────────────────────────────────────────────────────
+// Accumulated notebook config — merges across multiple lakehouse submissions
+// workspaceId → { lakehouses: [{lakehouseId, lakehouseName, tables}], dimensions: string[] }
+const notebookConfigStore = new Map();
+
+/** Merge a single-lakehouse config into the workspace-level accumulated store. */
+function mergeNotebookConfig(workspaceId, lakehouseId, lakehouseName, tables, dimensions) {
+  const existing = notebookConfigStore.get(workspaceId) ?? { lakehouses: [], dimensions: [] };
+  // Replace entry for this lakehouse if it already exists, otherwise add it
+  const idx = existing.lakehouses.findIndex(lh => lh.lakehouseId === lakehouseId);
+  const entry = { lakehouseId, lakehouseName, tables };
+  if (idx >= 0) existing.lakehouses[idx] = entry;
+  else existing.lakehouses.push(entry);
+  // Union of dimensions
+  const dimSet = new Set([...existing.dimensions, ...dimensions]);
+  existing.dimensions = [...dimSet];
+  notebookConfigStore.set(workspaceId, existing);
+  return existing;
+}
+
+
 
 function registerDqRoutes(app) {
   // GET /api/dq-preload — returns runs + all summaries in one call (5-min server cache)
@@ -418,7 +437,7 @@ function registerDqRoutes(app) {
     }
   });
 
-  // POST /api/dq-notebook — upserts the single "Governly DQ" notebook then triggers a run
+  // POST /api/dq-notebook — merges config across lakehouses, upserts single "Governly DQ" notebook, triggers run
   app.post('/api/dq-notebook', async (req, res) => {
     const config = req.body;
     if (!config?.workspaceId || !config?.lakehouseId || !config?.tables?.length) {
@@ -430,7 +449,24 @@ function registerDqRoutes(app) {
       // Provision the dedicated Governly_DQ lakehouse (creates if not exists)
       const dqLakehouseId = await ensureDqLakehouse(config.workspaceId, fabricToken);
 
-      const notebookJson = buildDqNotebook({ ...config, dqLakehouseId });
+      // Merge this submission into the accumulated config for this workspace
+      const merged = mergeNotebookConfig(
+        config.workspaceId,
+        config.lakehouseId,
+        config.lakehouseName,
+        config.tables,
+        config.dimensions ?? []
+      );
+      console.log(`[DQ-Notebook] Config now covers ${merged.lakehouses.length} lakehouse(s): ${merged.lakehouses.map(l => l.lakehouseName).join(', ')}`);
+
+      // Generate notebook from the full merged config (all lakehouses)
+      const notebookJson = buildDqNotebook({
+        runId:        config.runId,
+        workspaceId:  config.workspaceId,
+        dqLakehouseId,
+        lakehouses:   merged.lakehouses,
+        dimensions:   merged.dimensions,
+      });
       const payload = Buffer.from(notebookJson).toString('base64');
 
       // Check if the single Governly DQ notebook already exists

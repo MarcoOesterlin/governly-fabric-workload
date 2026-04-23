@@ -2,27 +2,32 @@
 
 /**
  * Builds a Fabric-compatible .ipynb notebook JSON string for a DQ run.
- * @param {object} config - { runId, workspaceId, lakehouseId, lakehouseName, tables, dimensions }
- *   tables: Array<{ tableName: string, columns: string[] }>
- *   dimensions: string[]
- *
- * Path structure (matches user extract pattern):
- *   Files/governly_dq/year={year}/month={month}/day={day}/run_id={run_id}/
- *   Tables/governly_dq_results  — partitioned by load_type/year/month/day/run_id
- *   Tables/governly_dq_failed_rows — partitioned by load_type/year/month/day/run_id
+ * @param {object} config
+ *   runId       - string (HHMMSS generated at run time, used for cell IDs)
+ *   workspaceId - string
+ *   dqLakehouseId - string
+ *   lakehouses  - Array<{ lakehouseId, lakehouseName, tables: [{tableName, columns}] }>
+ *   dimensions  - string[]
  */
 function buildDqNotebook(config) {
-  const { runId, workspaceId, lakehouseId, lakehouseName, tables, dimensions, dqLakehouseId } = config;
+  const { runId, workspaceId, dqLakehouseId, lakehouses, dimensions } = config;
 
-  const tableConfigPy = JSON.stringify(
-    Object.fromEntries(tables.map(t => [t.tableName, t.columns])),
+  // Serialise LAKEHOUSE_CONFIGS for Python
+  const lhConfigPy = JSON.stringify(
+    lakehouses.map(lh => ({
+      lakehouse_id:   lh.lakehouseId,
+      lakehouse_name: lh.lakehouseName,
+      table_config:   Object.fromEntries(lh.tables.map(t => [t.tableName, t.columns])),
+    })),
     null, 4
   );
 
   const dimensionsPy = JSON.stringify(dimensions);
 
+  const lhSummary = lakehouses.map(lh => `${lh.lakehouseName} (${lh.lakehouseId})`).join(', ');
+
   function cell(type, source) {
-    const base = { cell_type: type, id: runId.replace(/-/g, '').slice(0, 8) + '_' + Math.random().toString(36).slice(2, 6), metadata: {} };
+    const base = { cell_type: type, id: Math.random().toString(36).slice(2, 10), metadata: {} };
     if (type === 'code') return { ...base, execution_count: null, outputs: [], source };
     return { ...base, source };
   }
@@ -30,8 +35,7 @@ function buildDqNotebook(config) {
   const headerLines = [
     `# Governly Data Quality Check\n`,
     `\n`,
-    `**Notebook created for run:** \`${runId}\`  \n`,
-    `**Source Lakehouse:** ${lakehouseName} (\`${lakehouseId}\`)  \n`,
+    `**Source Lakehouses:** ${lhSummary}  \n`,
     `**DQ Results Lakehouse:** Governly_DQ (\`${dqLakehouseId}\`)  \n`,
     `**Dimensions:** ${dimensions.join(', ')}  \n`,
     `\n`,
@@ -45,31 +49,24 @@ function buildDqNotebook(config) {
     `import json\n`,
     `from datetime import datetime\n`,
     `\n`,
-    `# Source lakehouse (read data from here)\n`,
-    `WORKSPACE_ID          = "${workspaceId}"\n`,
-    `LAKEHOUSE_ID          = "${lakehouseId}"\n`,
-    `SOURCE_LAKEHOUSE_NAME = "${lakehouseName}"\n`,
-    `\n`,
-    `# DQ results lakehouse (write all results here)\n`,
+    `WORKSPACE_ID    = "${workspaceId}"\n`,
     `DQ_LAKEHOUSE_ID = "${dqLakehouseId}"\n`,
     `\n`,
     `LOAD_TYPE      = "full"\n`,
     `FRESHNESS_DAYS = 7\n`,
     `\n`,
-    `# Temporal partitioning keys — run_id is HHMMSS within the day\n`,
     `now    = datetime.utcnow()\n`,
     `year   = now.strftime("%Y")\n`,
     `month  = now.strftime("%m")\n`,
     `day    = now.strftime("%d")\n`,
     `run_id = now.strftime("%H%M%S")\n`,
-    `\n`,
     `RUN_TIMESTAMP = now.isoformat()\n`,
     `\n`,
-    `TABLE_CONFIG = ${tableConfigPy}\n`,
+    `# All lakehouses and tables to check — updated automatically by Governly\n`,
+    `LAKEHOUSE_CONFIGS = ${lhConfigPy}\n`,
     `\n`,
     `DIMENSIONS = ${dimensionsPy}\n`,
     `\n`,
-    `# Thresholds expressed as 0–100 percentages\n`,
     `THRESHOLDS = {\n`,
     `    "completeness": 95.0,\n`,
     `    "uniqueness":   95.0,\n`,
@@ -86,27 +83,23 @@ function buildDqNotebook(config) {
     `    "timeliness":   "Data is stale beyond freshness threshold",\n`,
     `}\n`,
     `\n`,
-    `def _path(sub):\n`,
-    `    """Read path — source lakehouse."""\n`,
-    `    return f"abfss://{WORKSPACE_ID}@onelake.dfs.fabric.microsoft.com/{LAKEHOUSE_ID}/{sub}"\n`,
+    `def _read_path(lakehouse_id, sub):\n`,
+    `    return f"abfss://{WORKSPACE_ID}@onelake.dfs.fabric.microsoft.com/{lakehouse_id}/{sub}"\n`,
     `\n`,
     `def _write_path(sub):\n`,
-    `    """Write path — dedicated Governly_DQ lakehouse."""\n`,
     `    return f"abfss://{WORKSPACE_ID}@onelake.dfs.fabric.microsoft.com/{DQ_LAKEHOUSE_ID}/{sub}"\n`,
     `\n`,
     `def _run_files_path():\n`,
     `    return _write_path(f"Files/governly_dq/year={year}/month={month}/day={day}/run_id={run_id}")\n`,
     `\n`,
-    `print(f"[DQ] Run ID: {run_id}  Date: {year}-{month}-{day}  Timestamp: {RUN_TIMESTAMP}")\n`,
-    `print(f"[DQ] Source: {SOURCE_LAKEHOUSE_NAME} ({LAKEHOUSE_ID})")\n`,
-    `print(f"[DQ] DQ lakehouse: {DQ_LAKEHOUSE_ID}")\n`
+    `lh_names = [c["lakehouse_name"] for c in LAKEHOUSE_CONFIGS]\n`,
+    `print(f"[DQ] Run ID: {run_id}  Date: {year}-{month}-{day}")\n`,
+    `print(f"[DQ] Checking {len(LAKEHOUSE_CONFIGS)} lakehouse(s): {', '.join(lh_names)}")\n`,
   ];
 
   const functionsLines = [
     `from pyspark.sql import functions as F\n`,
     `import hashlib\n`,
-    `\n`,
-    `# Each check function returns (metric_0_to_100, passed, failed_df_or_None, total_rows)\n`,
     `\n`,
     `def check_completeness(df, col, threshold):\n`,
     `    total = df.count()\n`,
@@ -194,64 +187,64 @@ function buildDqNotebook(config) {
     `all_results     = []\n`,
     `all_failed_rows = []\n`,
     `\n`,
-    `for table_name, col_names in TABLE_CONFIG.items():\n`,
-    `    tbl_path = _path("Tables/" + table_name.replace(".", "/"))\n`,
-    `    try:\n`,
-    `        df = spark.read.format("delta").load(tbl_path)\n`,
-    `        df.cache()\n`,
-    `    except Exception as e:\n`,
-    `        print(f"[DQ] Cannot load {table_name}: {e}")\n`,
-    `        continue\n`,
-    `    for col_name in col_names:\n`,
-    `        if col_name not in df.columns:\n`,
-    `            print(f"[DQ] Column {col_name} not in {table_name}")\n`,
+    `for lh_cfg in LAKEHOUSE_CONFIGS:\n`,
+    `    lh_id   = lh_cfg["lakehouse_id"]\n`,
+    `    lh_name = lh_cfg["lakehouse_name"]\n`,
+    `    print(f"\\n[DQ] === {lh_name} ({lh_id}) ===")\n`,
+    `    for table_name, col_names in lh_cfg["table_config"].items():\n`,
+    `        tbl_path = _read_path(lh_id, "Tables/" + table_name.replace(".", "/"))\n`,
+    `        try:\n`,
+    `            df = spark.read.format("delta").load(tbl_path)\n`,
+    `            df.cache()\n`,
+    `        except Exception as e:\n`,
+    `            print(f"[DQ] Cannot load {table_name}: {e}")\n`,
     `            continue\n`,
-    `        for dim in DIMENSIONS:\n`,
-    `            fn = DIM_FUNCS.get(dim)\n`,
-    `            if not fn: continue\n`,
-    `            try:\n`,
-    `                args = (df, col_name, FRESHNESS_DAYS) if dim == "timeliness" else (df, col_name, THRESHOLDS[dim])\n`,
-    `                metric, passed, failed_df, total_rows = fn(*args)\n`,
-    `                rule_id = f"{table_name}__{col_name}__{dim}"\n`,
-    `                all_results.append({\n`,
-    `                    "run_id": run_id, "load_type": LOAD_TYPE,\n`,
-    `                    "year": year, "month": month, "day": day,\n`,
-    `                    "table_name": table_name, "column_name": col_name,\n`,
-    `                    "dimension": dim, "metric_name": f"{dim}_rate",\n`,
-    `                    "metric_value": round(float(metric), 2),\n`,
-    `                    "threshold": THRESHOLDS.get(dim, 100.0),\n`,
-    `                    "passed": bool(passed), "total_rows": int(total_rows),\n`,
-    `                    "run_timestamp": RUN_TIMESTAMP,\n`,
-    `                    "source_lakehouse_id": LAKEHOUSE_ID,\n`,
-    `                    "source_lakehouse_name": SOURCE_LAKEHOUSE_NAME,\n`,
-    `                })\n`,
-    `                if failed_df is not None:\n`,
-    `                    for row in failed_df.collect():\n`,
-    `                        all_failed_rows.append({\n`,
-    `                            "run_id": run_id, "load_type": LOAD_TYPE,\n`,
-    `                            "year": year, "month": month, "day": day,\n`,
-    `                            "table_name": table_name, "column_name": col_name,\n`,
-    `                            "dimension": dim, "rule_id": rule_id,\n`,
-    `                            "row_hash": hashlib.md5(row["raw_values"].encode()).hexdigest(),\n`,
-    `                            "raw_values": row["raw_values"],\n`,
-    `                            "failure_reason": FAILURE_REASONS.get(dim, "Rule check failed"),\n`,
-    `                            "run_timestamp": RUN_TIMESTAMP,\n`,
-    `                        })\n`,
-    `                status = "PASS" if passed else "FAIL"\n`,
-    `                print(f"[DQ] {table_name}.{col_name} [{dim}]: {metric:.1f}% ({status}, {total_rows} rows)")\n`,
-    `            except Exception as e:\n`,
-    `                print(f"[DQ] Error {table_name}.{col_name} [{dim}]: {e}")\n`,
-    `    df.unpersist()\n`,
+    `        for col_name in col_names:\n`,
+    `            if col_name not in df.columns:\n`,
+    `                print(f"[DQ] Column {col_name} not in {table_name}")\n`,
+    `                continue\n`,
+    `            for dim in DIMENSIONS:\n`,
+    `                fn = DIM_FUNCS.get(dim)\n`,
+    `                if not fn: continue\n`,
+    `                try:\n`,
+    `                    args = (df, col_name, FRESHNESS_DAYS) if dim == "timeliness" else (df, col_name, THRESHOLDS[dim])\n`,
+    `                    metric, passed, failed_df, total_rows = fn(*args)\n`,
+    `                    rule_id = f"{table_name}__{col_name}__{dim}"\n`,
+    `                    all_results.append({\n`,
+    `                        "run_id": run_id, "load_type": LOAD_TYPE,\n`,
+    `                        "year": year, "month": month, "day": day,\n`,
+    `                        "table_name": table_name, "column_name": col_name,\n`,
+    `                        "dimension": dim, "metric_name": f"{dim}_rate",\n`,
+    `                        "metric_value": round(float(metric), 2),\n`,
+    `                        "threshold": THRESHOLDS.get(dim, 100.0),\n`,
+    `                        "passed": bool(passed), "total_rows": int(total_rows),\n`,
+    `                        "run_timestamp": RUN_TIMESTAMP,\n`,
+    `                        "source_lakehouse_id": lh_id,\n`,
+    `                        "source_lakehouse_name": lh_name,\n`,
+    `                    })\n`,
+    `                    if failed_df is not None:\n`,
+    `                        for row in failed_df.collect():\n`,
+    `                            all_failed_rows.append({\n`,
+    `                                "run_id": run_id, "load_type": LOAD_TYPE,\n`,
+    `                                "year": year, "month": month, "day": day,\n`,
+    `                                "table_name": table_name, "column_name": col_name,\n`,
+    `                                "dimension": dim, "rule_id": rule_id,\n`,
+    `                                "row_hash": hashlib.md5(row["raw_values"].encode()).hexdigest(),\n`,
+    `                                "raw_values": row["raw_values"],\n`,
+    `                                "failure_reason": FAILURE_REASONS.get(dim, "Rule check failed"),\n`,
+    `                                "run_timestamp": RUN_TIMESTAMP,\n`,
+    `                            })\n`,
+    `                    status = "PASS" if passed else "FAIL"\n`,
+    `                    print(f"[DQ] {table_name}.{col_name} [{dim}]: {metric:.1f}% ({status}, {total_rows} rows)")\n`,
+    `                except Exception as e:\n`,
+    `                    print(f"[DQ] Error {table_name}.{col_name} [{dim}]: {e}")\n`,
+    `        df.unpersist()\n`,
     `\n`,
-    `print(f"[DQ] {len(all_results)} result rows, {len(all_failed_rows)} failed rows")\n`
+    `print(f"\\n[DQ] Total: {len(all_results)} result rows, {len(all_failed_rows)} failed rows")\n`
   ];
 
   const writeDeltaLines = [
     `def _safe_write_delta(df, table_path, partition_cols):\n`,
-    `    """Append to Delta table; if the write fails for any reason (schema or partition\n`,
-    `    mismatch is common when the table was created by an older notebook), drop the\n`,
-    `    table and recreate it with the current schema.\n`,
-    `    """\n`,
     `    try:\n`,
     `        df.write.format("delta").mode("append") \\\n`,
     `            .option("mergeSchema", "true") \\\n`,
@@ -287,12 +280,15 @@ function buildDqNotebook(config) {
 
   const exportJsonLines = [
     `run_path = _run_files_path()\n`,
+    `lh_ids   = [c["lakehouse_id"]   for c in LAKEHOUSE_CONFIGS]\n`,
+    `lh_names = [c["lakehouse_name"] for c in LAKEHOUSE_CONFIGS]\n`,
     `\n`,
     `summary = {\n`,
-    `    "run_id": run_id, "run_timestamp": RUN_TIMESTAMP,\n`,
-    `    "source_lakehouse_id": LAKEHOUSE_ID,\n`,
-    `    "source_lakehouse_name": SOURCE_LAKEHOUSE_NAME,\n`,
-    `    "lakehouse_id": LAKEHOUSE_ID,\n`,
+    `    "run_id":               run_id,\n`,
+    `    "run_timestamp":        RUN_TIMESTAMP,\n`,
+    `    "source_lakehouse_id":  lh_ids[0]   if len(lh_ids)   == 1 else lh_ids,\n`,
+    `    "source_lakehouse_name": lh_names[0] if len(lh_names) == 1 else ", ".join(lh_names),\n`,
+    `    "lakehouse_id":         lh_ids[0]   if len(lh_ids)   == 1 else lh_ids,\n`,
     `    "year": year, "month": month, "day": day,\n`,
     `    "results": all_results,\n`,
     `}\n`,
