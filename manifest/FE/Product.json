@@ -2,8 +2,8 @@
     "name": "Governly",
     "version": "1.100",
     "displayName": "Governly",
-    "fullDisplayName": "Governly – Sensitivity Label Manager",
-    "description": "Bulk-apply Microsoft Purview sensitivity labels to Fabric items",
+    "fullDisplayName": "Governly – Workspace Data Governance",
+    "description": "Workspace-level data governance for Microsoft Fabric",
     "favicon": "assets/icon.png",
     "icon": {
         "name": "assets/icon.png"
@@ -13,7 +13,7 @@
         {
             "title": "Governly Documentation",
             "introduction": "Get started with Governly",
-            "description": "Learn how to bulk-apply sensitivity labels to Microsoft Fabric items using Governly",
+            "description": "Monitor data quality, manage lakehouses, and govern your Microsoft Fabric workspace with Governly",
             "image": "assets/icon.png",
             "link": "https://github.com/MarcoOesterlin/governly-fabric-workload"
         }
@@ -21,11 +21,11 @@
         "recommendedItemTypes": ["Instance"]
     },
     "createExperience": {
-        "description": "Bulk-apply sensitivity labels to Fabric items",
+        "description": "Workspace-level data governance for Microsoft Fabric",
         "cards": [
             {
                 "title": "Governly",
-                "description": "Bulk-apply Purview sensitivity labels to Fabric items and domains",
+                "description": "Monitor data quality, track lakehouse health, and govern your Fabric workspace from one place",
                 "icon": {
                     "name": "assets/icon.png"
                 },
@@ -47,8 +47,8 @@
     },
     "productDetail": {
         "publisher": "Governly",
-        "slogan": "Sensitivity Label Management for Microsoft Fabric",
-        "description": "Bulk-apply Microsoft Purview sensitivity labels to Fabric items, domains, and lakehouses",
+        "slogan": "Data Governance for Microsoft Fabric Workspaces",
+        "description": "Governly is a workspace-level data governance tool for Microsoft Fabric. Monitor data quality across lakehouses, track DQ runs, drill into failed rows, and keep your data estate healthy.",
         "image": {
             "mediaType": 0,
             "source": "assets/icon.png"
