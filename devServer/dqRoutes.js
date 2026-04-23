@@ -290,7 +290,48 @@ async function triggerNotebookRun(token, workspaceId, notebookId) {
   throw new Error(`Notebook trigger failed (${resp.status}): ${resp.body.slice(0, 200)}`);
 }
 
-// ── In-memory preload cache (5-minute TTL per workspace) ─────────────────────
+// ── Notebook upsert helpers ───────────────────────────────────────────────────
+
+const DQ_NOTEBOOK_NAME = 'Governly DQ';
+
+/** Find the Governly DQ notebook in a workspace; returns { id, webUrl } or null. */
+async function findDqNotebook(workspaceId, token) {
+  const resp = await httpRequest(`${FABRIC_API}/workspaces/${workspaceId}/notebooks`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!resp.ok) return null;
+  const notebooks = JSON.parse(resp.body).value ?? [];
+  const found = notebooks.find(n => n.displayName === DQ_NOTEBOOK_NAME);
+  return found ? { id: found.id, webUrl: found.webUrl ?? `https://app.fabric.microsoft.com/groups/${workspaceId}/notebooks/${found.id}` } : null;
+}
+
+/** Update the definition of an existing notebook. Returns when complete (handles 200 + 202). */
+async function updateNotebookDefinition(workspaceId, notebookId, payload, token) {
+  const body = JSON.stringify({
+    definition: {
+      format: 'ipynb',
+      parts: [{ path: 'notebook-content.ipynb', payload, payloadType: 'InlineBase64' }],
+    },
+  });
+  const resp = await httpRequest(
+    `${FABRIC_API}/workspaces/${workspaceId}/notebooks/${notebookId}/updateDefinition`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'Content-Length': String(Buffer.byteLength(body)) },
+      body,
+    }
+  );
+  if (resp.status === 200 || resp.status === 204) return; // sync success
+  if (resp.status === 202) {
+    const opLocation = resp.headers['operation-location'] ?? resp.headers['location'] ?? '';
+    const operationId = opLocation.split('/operations/')[1]?.split('?')[0];
+    if (operationId) await pollOperation(token, operationId);
+    return;
+  }
+  throw new Error(`updateDefinition failed (${resp.status}): ${resp.body.slice(0, 300)}`);
+}
+
+
 
 const preloadCache = new Map(); // workspaceId → { data, expiry }
 const PRELOAD_CACHE_TTL = 5 * 60 * 1000;
@@ -377,7 +418,7 @@ function registerDqRoutes(app) {
     }
   });
 
-  // POST /api/dq-notebook
+  // POST /api/dq-notebook — upserts the single "Governly DQ" notebook then triggers a run
   app.post('/api/dq-notebook', async (req, res) => {
     const config = req.body;
     if (!config?.workspaceId || !config?.lakehouseId || !config?.tables?.length) {
@@ -392,41 +433,56 @@ function registerDqRoutes(app) {
       const notebookJson = buildDqNotebook({ ...config, dqLakehouseId });
       const payload = Buffer.from(notebookJson).toString('base64');
 
-      const body = JSON.stringify({
-        displayName: `Governly DQ - ${config.runId}`,
-        definition: {
-          format: 'ipynb',
-          parts: [{ path: 'notebook-content.ipynb', payload, payloadType: 'InlineBase64' }],
-        },
-      });
+      // Check if the single Governly DQ notebook already exists
+      const existing = await findDqNotebook(config.workspaceId, fabricToken);
 
-      const createResp = await httpRequest(`${FABRIC_API}/workspaces/${config.workspaceId}/notebooks`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${fabricToken}`, 'Content-Type': 'application/json', 'Content-Length': String(Buffer.byteLength(body)) },
-        body,
-      });
+      let notebookId, webUrl;
 
-      if (createResp.status === 201) {
-        const nb = JSON.parse(createResp.body);
-        const webUrl = nb.webUrl ?? `https://app.fabric.microsoft.com/groups/${config.workspaceId}/notebooks/${nb.id}`;
-        const jobInstanceId = await triggerNotebookRun(fabricToken, config.workspaceId, nb.id);
-        preloadCache.delete(config.workspaceId); // invalidate so next dashboard load gets fresh data
-        return res.json({ id: nb.id, webUrl, dqLakehouseId, jobInstanceId });
+      if (existing) {
+        // Update the existing notebook's definition in place
+        console.log(`[DQ-Notebook] Updating existing notebook ${existing.id}…`);
+        await updateNotebookDefinition(config.workspaceId, existing.id, payload, fabricToken);
+        notebookId = existing.id;
+        webUrl = existing.webUrl;
+        console.log(`[DQ-Notebook] Definition updated for notebook ${notebookId}`);
+      } else {
+        // First time — create the notebook
+        console.log(`[DQ-Notebook] Creating new "${DQ_NOTEBOOK_NAME}" notebook…`);
+        const body = JSON.stringify({
+          displayName: DQ_NOTEBOOK_NAME,
+          definition: {
+            format: 'ipynb',
+            parts: [{ path: 'notebook-content.ipynb', payload, payloadType: 'InlineBase64' }],
+          },
+        });
+        const createResp = await httpRequest(`${FABRIC_API}/workspaces/${config.workspaceId}/notebooks`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${fabricToken}`, 'Content-Type': 'application/json', 'Content-Length': String(Buffer.byteLength(body)) },
+          body,
+        });
+
+        if (createResp.status === 201) {
+          const nb = JSON.parse(createResp.body);
+          notebookId = nb.id;
+          webUrl = nb.webUrl ?? `https://app.fabric.microsoft.com/groups/${config.workspaceId}/notebooks/${nb.id}`;
+        } else if (createResp.status === 202) {
+          const opLocation = createResp.headers['operation-location'] ?? createResp.headers['location'] ?? '';
+          const operationId = opLocation.split('/operations/')[1]?.split('?')[0];
+          if (!operationId) throw new Error('No operationId in 202 response');
+          await pollOperation(fabricToken, operationId);
+          const result = await getOperationResult(fabricToken, operationId);
+          notebookId = result.id;
+          webUrl = result.webUrl ?? `https://app.fabric.microsoft.com/groups/${config.workspaceId}/notebooks/${result.id}`;
+        } else {
+          throw new Error(`Notebook create failed (${createResp.status}): ${createResp.body.slice(0, 300)}`);
+        }
+        console.log(`[DQ-Notebook] Created notebook ${notebookId}`);
       }
 
-      if (createResp.status === 202) {
-        const opLocation = createResp.headers['operation-location'] ?? createResp.headers['location'] ?? '';
-        const operationId = opLocation.split('/operations/')[1]?.split('?')[0];
-        if (!operationId) throw new Error('No operationId in 202 response');
-        await pollOperation(fabricToken, operationId);
-        const result = await getOperationResult(fabricToken, operationId);
-        const webUrl = result.webUrl ?? `https://app.fabric.microsoft.com/groups/${config.workspaceId}/notebooks/${result.id}`;
-        const jobInstanceId = await triggerNotebookRun(fabricToken, config.workspaceId, result.id);
-        preloadCache.delete(config.workspaceId); // invalidate
-        return res.json({ id: result.id, webUrl, dqLakehouseId, jobInstanceId });
-      }
+      const jobInstanceId = await triggerNotebookRun(fabricToken, config.workspaceId, notebookId);
+      preloadCache.delete(config.workspaceId);
+      return res.json({ id: notebookId, webUrl, dqLakehouseId, jobInstanceId });
 
-      throw new Error(`Notebook create failed (${createResp.status}): ${createResp.body.slice(0, 300)}`);
     } catch (err) {
       console.error('[DQ-Notebook]', err.message);
       res.status(500).json({ error: err.message });

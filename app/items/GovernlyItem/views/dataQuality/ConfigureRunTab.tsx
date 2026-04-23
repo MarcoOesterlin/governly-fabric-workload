@@ -103,7 +103,7 @@ export const ConfigureRunTab: React.FC<Props> = ({ apiClient, workspaceId, workl
               color: '#fff', fontWeight: 600, fontSize: 14, cursor: canRun && runState !== 'creating' ? 'pointer' : 'default',
             }}
           >
-            {runState === 'creating' ? 'Creating & starting notebook…' : 'Create & Run DQ Notebook'}
+            {runState === 'creating' ? 'Updating & starting notebook…' : 'Run DQ Checks'}
           </button>
 
           {!canRun && runState === 'idle' && (
@@ -114,7 +114,7 @@ export const ConfigureRunTab: React.FC<Props> = ({ apiClient, workspaceId, workl
 
           {runState === 'done' && notebookUrl && (
             <div style={{ marginTop: 12, padding: 10, background: `${t.pass}22`, border: `1px solid ${t.pass}44`, borderRadius: 4, fontSize: 13, color: t.pass }}>
-              Notebook created and running!{' '}
+              Notebook updated and running!{' '}
               <button
                 onClick={() => {
                   try {
