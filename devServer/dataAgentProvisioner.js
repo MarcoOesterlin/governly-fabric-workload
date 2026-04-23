@@ -508,4 +508,4 @@ async function provisionDataAgent(token, workspaceId, instanceName) {
   };
 }
 
-module.exports = { provisionDataAgent, fetchLakehouseTables, getOneLakeToken };
+module.exports = { provisionDataAgent, fetchLakehouseTables, getOneLakeToken, httpRequest };

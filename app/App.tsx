@@ -2,7 +2,7 @@ import React from "react";
 import { Route, Router, Switch } from "react-router-dom";
 import { History } from "history";
 import { WorkloadClientAPI } from "@ms-fabric/workload-client";
-import { ClassifierItemEditor } from "./items/ClassifierItem";
+import { GovernlyItemEditor } from "./items/GovernlyItem";
 import { ConditionalPlaygroundRoutes } from "./playground/ConditionalPlaygroundRoutes";
 
 class ErrorBoundary extends React.Component<
@@ -63,12 +63,12 @@ export function App({ history, workloadClient }: AppProps) {
         <Switch>
             {/* Editor route — Fabric navigates to {editor.path}/{itemObjectId} */}
             <Route path="/index.html/:itemObjectId">
-                <ClassifierItemEditor workloadClient={workloadClient} />
+                <GovernlyItemEditor workloadClient={workloadClient} />
             </Route>
 
             {/* Also match worker-initiated navigation */}
             <Route path="/ClassifierItem-editor/:itemObjectId">
-                <ClassifierItemEditor workloadClient={workloadClient} />
+                <GovernlyItemEditor workloadClient={workloadClient} />
             </Route>
 
             {/* Conditionally loaded playground routes (only in development) */}

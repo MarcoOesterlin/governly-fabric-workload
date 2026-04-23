@@ -6,8 +6,9 @@
 const manifestApi = require('./manifestApi');
 const workloadApi = require('./workloadApi');
 const governlyProxy = require('./governlyProxy');
-const { provisionDataAgent } = require('./dataAgentProvisioner');
+const { provisionDataAgent, httpRequest } = require('./dataAgentProvisioner');
 const { suggestLabels } = require('./labelSuggester');
+const { registerDqRoutes } = require('./dqRoutes');
 
 /**
  * Register dev server manifest APIs with an Express application
@@ -28,30 +29,22 @@ function registerDevServerApis(app) {
     }
     try {
       const token = governlyProxy.acquireFabricToken();
-      const resp = await require('https').get(
+      const resp = await httpRequest(
         `https://api.fabric.microsoft.com/v1/workspaces/${workspaceId}/dataAgents`,
-        { headers: { Authorization: `Bearer ${token}` } },
-        (httpRes) => {
-          const chunks = [];
-          httpRes.on('data', c => chunks.push(c));
-          httpRes.on('end', () => {
-            const body = Buffer.concat(chunks).toString();
-            if (httpRes.statusCode < 200 || httpRes.statusCode >= 300) {
-              return res.json({ exists: false });
-            }
-            try {
-              const agents = JSON.parse(body).value ?? [];
-              const agent = agents.find(a => a.displayName === 'Governly Data Agent');
-              if (agent) {
-                res.json({ exists: true, agentId: agent.id, agentName: agent.displayName });
-              } else {
-                res.json({ exists: false });
-              }
-            } catch { res.json({ exists: false }); }
-          });
-        }
+        { headers: { Authorization: `Bearer ${token}` } }
       );
-      resp.on('error', () => res.json({ exists: false }));
+      if (!resp.ok) {
+        console.log(`[DataAgentStatus] Fabric API returned ${resp.status}: ${resp.body.slice(0, 300)}`);
+        return res.json({ exists: false });
+      }
+      const agents = JSON.parse(resp.body).value ?? [];
+      console.log(`[DataAgentStatus] Found ${agents.length} agent(s): ${JSON.stringify(agents.map(a => ({ id: a.id, name: a.displayName })))}`);
+      const agent = agents.find(a => a.displayName === 'Governly Data Agent');
+      if (agent) {
+        res.json({ exists: true, agentId: agent.id, agentName: agent.displayName });
+      } else {
+        res.json({ exists: false });
+      }
     } catch (err) {
       console.error('[DataAgentStatus] Error:', err.message);
       res.json({ exists: false });
@@ -88,6 +81,9 @@ function registerDevServerApis(app) {
       res.status(500).json({ error: err.message });
     }
   });
+
+  console.log('*** Mounting Governly DQ Routes ***');
+  registerDqRoutes(app);
 
   console.log('*** Mounting Governly API Proxy (Fabric/Graph via Azure CLI) ***');
   app.use('/', governlyProxy);

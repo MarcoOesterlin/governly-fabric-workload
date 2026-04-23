@@ -16,7 +16,7 @@ import { callGetItem } from '../../controller/ItemCRUDController';
 import { ItemsView } from './views/ItemsView';
 import { DataQualityView } from './views/DataQualityView';
 
-interface ClassifierItemEditorProps {
+interface GovernlyItemEditorProps {
   workloadClient: WorkloadClientAPI;
 }
 
@@ -34,7 +34,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'data-quality', labelKey: 'Nav_DataQuality',  defaultLabel: 'Data Quality',    icon: <CheckmarkStarburst24Regular /> },
 ];
 
-const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadClient }) => {
+const GovernlyItemEditor: React.FC<GovernlyItemEditorProps> = ({ workloadClient }) => {
   const { itemObjectId } = useParams<{ itemObjectId: string }>();
   const location = useLocation();
   const wsIdFromUrl = new URLSearchParams(location.search).get('wsId') ?? undefined;
@@ -200,7 +200,7 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
           />
         );
       case 'data-quality':
-        return <DataQualityView />;
+        return <DataQualityView apiClient={apiClient} workspaceId={workspaceId ?? ''} workloadClient={workloadClient} />;
       default:
         return null;
     }
@@ -394,5 +394,5 @@ const ClassifierItemEditor: React.FC<ClassifierItemEditorProps> = ({ workloadCli
   );
 };
 
-export { ClassifierItemEditor };
-export default ClassifierItemEditor;
+export { GovernlyItemEditor };
+export default GovernlyItemEditor;

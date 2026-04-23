@@ -1,4 +1,5 @@
 import { WorkloadClientAPI } from '@ms-fabric/workload-client';
+import type { TableColumn, DqRunConfig, DqRunMeta, DqRunSummary, DqFailedRow, DqPreloadResult } from '../items/GovernlyItem/views/dataQuality/dqTypes';
 
 // Fabric constructs are batch-limited to 2,000 items per request.
 const BATCH_SIZE = 2000;
@@ -247,10 +248,12 @@ export class GovernlyApiClient {
   }
 
   async listLakehouseTables(workspaceId: string, lakehouseId: string): Promise<LakehouseTable[]> {
-    const data = await this.fabric<{ data: any[] }>(
-      `/workspaces/${workspaceId}/lakehouses/${lakehouseId}/tables`
-    );
-    return (data.data ?? []).map((t) => ({ name: t.name, type: t.type, format: t.format ?? '' }));
+    // Uses OneLake DFS via /api/dq-tables — works for both schema-enabled and regular lakehouses
+    const qs = new URLSearchParams({ workspaceId, lakehouseId });
+    const resp = await fetch(`/api/dq-tables?${qs}`);
+    if (!resp.ok) return [];
+    const data = await resp.json() as { tables: LakehouseTable[] };
+    return data.tables ?? [];
   }
 
   async listSensitivityLabels(): Promise<SensitivityLabel[]> {
@@ -415,5 +418,65 @@ export class GovernlyApiClient {
     }
 
     return response.json() as Promise<LabelSuggestionsResult>;
+  }
+
+  // ── Data Quality ─────────────────────────────────────────────────────────────
+
+  async getTableSchema(workspaceId: string, lakehouseId: string, tableName: string): Promise<TableColumn[]> {
+    const qs = new URLSearchParams({ workspaceId, lakehouseId, tableName });
+    const resp = await fetch(`/api/dq-schema?${qs}`);
+    if (!resp.ok) throw new Error(`getTableSchema failed (${resp.status}): ${await resp.text()}`);
+    const data = await resp.json() as { columns: TableColumn[] };
+    return data.columns ?? [];
+  }
+
+  async createDqNotebook(config: DqRunConfig): Promise<{ id: string; webUrl: string }> {
+    const resp = await fetch('/api/dq-notebook', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    });
+    if (!resp.ok) throw new Error(`createDqNotebook failed (${resp.status}): ${await resp.text()}`);
+    return resp.json() as Promise<{ id: string; webUrl: string }>;
+  }
+
+  async listDqRuns(workspaceId: string): Promise<DqRunMeta[]> {
+    const qs = new URLSearchParams({ workspaceId });
+    const resp = await fetch(`/api/dq-runs?${qs}`);
+    if (!resp.ok) return [];
+    const data = await resp.json() as { runs: DqRunMeta[] };
+    return data.runs ?? [];
+  }
+
+  async preloadDqDashboard(workspaceId: string): Promise<DqPreloadResult> {
+    const qs = new URLSearchParams({ workspaceId });
+    const resp = await fetch(`/api/dq-preload?${qs}`);
+    if (!resp.ok) return { runs: [], summaries: {} };
+    return resp.json() as Promise<DqPreloadResult>;
+  }
+
+  async getDqRunSummary(workspaceId: string, runMeta: DqRunMeta): Promise<DqRunSummary> {
+    const qs = new URLSearchParams({ workspaceId, runId: runMeta.run_id });
+    if (runMeta.year)  qs.set('year',  runMeta.year);
+    if (runMeta.month) qs.set('month', runMeta.month);
+    if (runMeta.day)   qs.set('day',   runMeta.day);
+    const resp = await fetch(`/api/dq-run-summary?${qs}`);
+    if (!resp.ok) throw new Error(`getDqRunSummary failed (${resp.status}): ${await resp.text()}`);
+    return resp.json() as Promise<DqRunSummary>;
+  }
+
+  async getDqFailedRows(
+    workspaceId: string,
+    runMeta: DqRunMeta,
+    page = 1,
+    pageSize = 50
+  ): Promise<{ rows: DqFailedRow[]; total: number; page: number; pageSize: number }> {
+    const qs = new URLSearchParams({ workspaceId, runId: runMeta.run_id, page: String(page), pageSize: String(pageSize) });
+    if (runMeta.year)  qs.set('year',  runMeta.year);
+    if (runMeta.month) qs.set('month', runMeta.month);
+    if (runMeta.day)   qs.set('day',   runMeta.day);
+    const resp = await fetch(`/api/dq-failed-rows?${qs}`);
+    if (!resp.ok) throw new Error(`getDqFailedRows failed (${resp.status}): ${await resp.text()}`);
+    return resp.json() as Promise<{ rows: DqFailedRow[]; total: number; page: number; pageSize: number }>;
   }
 }
