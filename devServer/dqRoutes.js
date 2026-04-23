@@ -360,8 +360,10 @@ function mergeNotebookConfig(workspaceId, lakehouseId, lakehouseName, tables, di
 function registerDqRoutes(app) {
   // GET /api/dq-preload — returns runs + all summaries in one call (5-min server cache)
   app.get('/api/dq-preload', async (req, res) => {
-    const { workspaceId } = req.query;
+    const { workspaceId, bust } = req.query;
     if (!workspaceId) return res.status(400).json({ error: 'workspaceId required' });
+
+    if (bust === 'true') preloadCache.delete(workspaceId);
 
     const cached = preloadCache.get(workspaceId);
     if (cached && cached.expiry > Date.now()) {

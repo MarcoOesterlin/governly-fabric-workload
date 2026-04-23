@@ -257,7 +257,7 @@ const GovernlyItemEditor: React.FC<GovernlyItemEditorProps> = ({ workloadClient 
           />
         );
       case 'data-quality':
-        return <DataQualityView apiClient={apiClient} workspaceId={workspaceId ?? ''} workloadClient={workloadClient} />;
+        return <DataQualityView apiClient={apiClient} workspaceId={workspaceId ?? ''} workloadClient={workloadClient} refreshTrigger={refreshTrigger} />;
       default:
         return null;
     }

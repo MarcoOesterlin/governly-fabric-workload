@@ -10,6 +10,7 @@ interface Props {
   apiClient: GovernlyApiClient;
   workspaceId: string;
   workloadClient: WorkloadClientAPI;
+  refreshTrigger?: number;
 }
 
 type TabKey = 'configure' | 'dashboard' | 'failed';
@@ -22,7 +23,7 @@ const TABS: { key: TabKey; label: string }[] = [
 
 const STORAGE_KEY = 'governly_dq_dark_mode';
 
-export const DataQualityView: React.FC<Props> = ({ apiClient, workspaceId, workloadClient }) => {
+export const DataQualityView: React.FC<Props> = ({ apiClient, workspaceId, workloadClient, refreshTrigger }) => {
   const [activeTab, setActiveTab] = useState<TabKey>('dashboard');
   const [drillTable, setDrillTable] = useState<string | undefined>(undefined);
   const [drillRunId, setDrillRunId] = useState<string | undefined>(undefined);
@@ -38,12 +39,13 @@ export const DataQualityView: React.FC<Props> = ({ apiClient, workspaceId, workl
 
   useEffect(() => {
     if (!workspaceId) return;
+    const isBust = (refreshTrigger ?? 0) > 0;
     setPreloadLoading(true);
-    apiClient.preloadDqDashboard(workspaceId)
+    apiClient.preloadDqDashboard(workspaceId, isBust)
       .then(data => { setPreload(data); setPreloadError(null); })
       .catch(err => setPreloadError(err.message))
       .finally(() => setPreloadLoading(false));
-  }, [apiClient, workspaceId]);
+  }, [apiClient, workspaceId, refreshTrigger]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, String(darkMode));

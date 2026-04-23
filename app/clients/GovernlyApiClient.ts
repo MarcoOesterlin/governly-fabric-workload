@@ -448,8 +448,9 @@ export class GovernlyApiClient {
     return data.runs ?? [];
   }
 
-  async preloadDqDashboard(workspaceId: string): Promise<DqPreloadResult> {
+  async preloadDqDashboard(workspaceId: string, bust = false): Promise<DqPreloadResult> {
     const qs = new URLSearchParams({ workspaceId });
+    if (bust) qs.set('bust', 'true');
     const resp = await fetch(`/api/dq-preload?${qs}`);
     if (!resp.ok) return { runs: [], summaries: {} };
     return resp.json() as Promise<DqPreloadResult>;
