@@ -57,25 +57,26 @@ const useStyles = makeStyles({
   },
   header: {
     height: '48px',
-    background: 'linear-gradient(90deg, #0f172a 0%, #1a2540 100%)',
+    background: '#f3f4f6',
+    borderBottom: '1px solid #e2e8f0',
     display: 'flex',
     alignItems: 'center',
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
     gap: tokens.spacingHorizontalXS,
     flexShrink: '0',
-    boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
   },
   headerIcon: {
-    color: '#00b4e6',
+    color: '#0078d4',
     flexShrink: '0',
   },
   headerTitle: {
     fontWeight: tokens.fontWeightSemibold,
     fontSize: tokens.fontSizeBase400,
-    color: '#ffffff',
+    color: '#1a1a2e',
     flex: '1',
-    letterSpacing: '0.5px',
+    letterSpacing: '0.2px',
   },
   body: {
     display: 'flex',
@@ -277,22 +278,22 @@ const GovernlyItemEditor: React.FC<GovernlyItemEditorProps> = ({ workloadClient 
             title={agentButtonTitle}
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
-              padding: '5px 14px', borderRadius: 6, border: 'none',
+              padding: '5px 14px', borderRadius: 6, border: '1px solid transparent',
               cursor: agentBusy || agentDone ? 'default' : 'pointer',
               fontSize: 13, fontWeight: 600,
-              color: agentDone ? '#00cc72' : 'white',
+              color: agentDone ? '#107c10' : '#323130',
               background: agentDone
-                ? 'rgba(0,204,114,0.18)'
+                ? 'rgba(16,124,16,0.1)'
                 : dataAgentStatus === 'error'
-                  ? 'rgba(245,64,90,0.18)'
-                  : 'rgba(0,180,230,0.18)',
-              opacity: agentBusy ? 0.7 : 1,
+                  ? 'rgba(196,49,75,0.1)'
+                  : 'rgba(0,120,212,0.08)',
+              opacity: agentBusy ? 0.6 : 1,
               transition: 'background 0.15s',
             }}
           >
             {agentBusy
-              ? <Spinner size="extra-tiny" style={{ color: 'white' }} />
-              : <Bot24Regular style={{ fontSize: 16, color: agentDone ? '#00cc72' : 'rgba(255,255,255,0.85)' }} />}
+              ? <Spinner size="extra-tiny" />
+              : <Bot24Regular style={{ fontSize: 16, color: agentDone ? '#107c10' : '#0078d4' }} />}
             {agentButtonLabel}
           </button>
         )}
@@ -305,10 +306,10 @@ const GovernlyItemEditor: React.FC<GovernlyItemEditorProps> = ({ workloadClient 
               display: 'flex', alignItems: 'center', gap: 6,
               padding: '5px 14px', borderRadius: 6, border: 'none',
               cursor: 'pointer', fontSize: 13, fontWeight: 500,
-              color: 'rgba(255,255,255,0.85)', background: 'transparent',
+              color: '#323130', background: 'transparent',
             }}
           >
-            <Open24Regular style={{ fontSize: 16 }} />
+            <Open24Regular style={{ fontSize: 16, color: '#605e5c' }} />
             Open Workspace
           </button>
         )}
@@ -320,10 +321,10 @@ const GovernlyItemEditor: React.FC<GovernlyItemEditorProps> = ({ workloadClient 
             display: 'flex', alignItems: 'center', gap: 6,
             padding: '5px 14px', borderRadius: 6, border: 'none',
             cursor: 'pointer', fontSize: 13, fontWeight: 500,
-            color: 'rgba(255,255,255,0.85)', background: 'transparent',
+            color: '#323130', background: 'transparent',
           }}
         >
-          <ArrowClockwise24Regular style={{ fontSize: 16 }} />
+          <ArrowClockwise24Regular style={{ fontSize: 16, color: '#605e5c' }} />
           {t('Classifier_Ribbon_Refresh', 'Refresh')}
         </button>
       </div>

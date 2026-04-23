@@ -26,7 +26,7 @@ export const DataQualityView: React.FC<Props> = ({ apiClient, workspaceId, workl
   const [activeTab, setActiveTab] = useState<TabKey>('dashboard');
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
-    return stored === null ? true : stored === 'true';
+    return stored === null ? false : stored === 'true';
   });
 
   // Eagerly preload all dashboard + failed rows data on mount
