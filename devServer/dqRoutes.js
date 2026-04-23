@@ -328,7 +328,20 @@ function registerDqRoutes(app) {
         if (result.status === 'fulfilled') summaries[recentRuns[i].run_id] = result.value;
       });
 
-      const data = { runs, summaries };
+      // Also preload failed rows for the latest run (page 1, up to 50 rows)
+      let latestFailedRows = null;
+      if (runs.length > 0) {
+        const latest = runs[0];
+        try {
+          const frPath = `governly_dq/year=${latest.year}/month=${latest.month}/day=${latest.day}/run_id=${latest.run_id}/failed_rows.json`;
+          const frData = await readOneLakeFile(workspaceId, dqLakehouseId, frPath);
+          const all = frData.failed_rows ?? [];
+          latestFailedRows = { rows: all.slice(0, 50), total: all.length };
+          console.log(`[DQ-Preload] Loaded ${all.length} failed rows for run ${latest.run_id}`);
+        } catch (_) { /* no failed rows file for this run */ }
+      }
+
+      const data = { runs, summaries, latestFailedRows };
       preloadCache.set(workspaceId, { data, expiry: Date.now() + PRELOAD_CACHE_TTL });
       console.log(`[DQ-Preload] Loaded ${runs.length} runs + ${Object.keys(summaries).length} summaries for workspace ${workspaceId}`);
       res.json(data);

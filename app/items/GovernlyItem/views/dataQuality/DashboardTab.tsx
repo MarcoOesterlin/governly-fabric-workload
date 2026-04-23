@@ -8,6 +8,10 @@ interface Props {
   apiClient: GovernlyApiClient;
   workspaceId: string;
   darkMode: boolean;
+  runs: DqRunMeta[];
+  summaries: Record<string, DqRunSummary>;
+  loading: boolean;
+  error: string | null;
 }
 
 interface TrendPoint {
@@ -16,28 +20,17 @@ interface TrendPoint {
   label: string;
 }
 
-export const DashboardTab: React.FC<Props> = ({ apiClient, workspaceId, darkMode }) => {
+export const DashboardTab: React.FC<Props> = ({ darkMode, runs, summaries, loading, error }) => {
   const t = darkMode ? DARK_THEME : LIGHT_THEME;
 
-  const [runs, setRuns]               = useState<DqRunMeta[]>([]);
-  const [summaryMap, setSummaryMap]   = useState<Record<string, DqRunSummary>>({});
   const [selectedRun, setSelectedRun] = useState<string>('');
-  const [loading, setLoading]         = useState(false);
-  const [error, setError]             = useState<string | null>(null);
 
-  // Single preload call — replaces N+1 API calls
+  // Set initial selected run when data arrives
   useEffect(() => {
-    setLoading(true);
-    apiClient.preloadDqDashboard(workspaceId)
-      .then(({ runs: r, summaries }) => {
-        setRuns(r);
-        setSummaryMap(summaries);
-        if (r.length > 0) setSelectedRun(r[0].run_id);
-      })
-      .catch(err => setError(err.message))
-      .finally(() => setLoading(false));
-  }, [apiClient, workspaceId]);
+    if (runs.length > 0 && !selectedRun) setSelectedRun(runs[0].run_id);
+  }, [runs]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const summaryMap = summaries;
   const summary: DqRunSummary | null = summaryMap[selectedRun] ?? null;
   const results: DqResultRow[] = summary?.results ?? [];
 

@@ -6,17 +6,19 @@ interface Props {
   apiClient: GovernlyApiClient;
   workspaceId: string;
   darkMode: boolean;
+  initialRuns: DqRunMeta[];
+  initialFailedRows: { rows: DqFailedRow[]; total: number } | null;
+  preloadLoading: boolean;
 }
 
 const PAGE_SIZE = 50;
 
-export const FailedRowsTab: React.FC<Props> = ({ apiClient, workspaceId, darkMode }) => {
+export const FailedRowsTab: React.FC<Props> = ({ apiClient, workspaceId, darkMode, initialRuns, initialFailedRows, preloadLoading }) => {
   const t = darkMode ? DARK_THEME : LIGHT_THEME;
 
-  const [runs, setRuns] = useState<DqRunMeta[]>([]);
-
-  const [rows, setRows]       = useState<DqFailedRow[]>([]);
-  const [total, setTotal]     = useState(0);
+  const [runs, setRuns]       = useState<DqRunMeta[]>(initialRuns);
+  const [rows, setRows]       = useState<DqFailedRow[]>(initialFailedRows?.rows ?? []);
+  const [total, setTotal]     = useState(initialFailedRows?.total ?? 0);
   const [page, setPage]       = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState<string | null>(null);
@@ -25,11 +27,15 @@ export const FailedRowsTab: React.FC<Props> = ({ apiClient, workspaceId, darkMod
   const [filterColumn, setFilterColumn] = useState('');
   const [filterDim, setFilterDim]       = useState('');
 
+  // Sync when preloaded data arrives
+  useEffect(() => { setRuns(initialRuns); }, [initialRuns]);
   useEffect(() => {
-    apiClient.listDqRuns(workspaceId).then(r => {
-      setRuns(r);
-    }).catch(console.error);
-  }, [apiClient, workspaceId]);
+    if (initialFailedRows) {
+      setRows(initialFailedRows.rows);
+      setTotal(initialFailedRows.total);
+      setPage(1);
+    }
+  }, [initialFailedRows]);
 
   const latestRun = runs[0] ?? null;
 
@@ -41,8 +47,11 @@ export const FailedRowsTab: React.FC<Props> = ({ apiClient, workspaceId, darkMod
       .catch(err => { setError(err.message); setLoading(false); });
   }, [apiClient, workspaceId]);
 
+  // Only fetch from API if we have no preloaded data (e.g., preload failed or latestRun changed)
   useEffect(() => {
     if (!latestRun) { setRows([]); setTotal(0); return; }
+    // Skip if preload already provided page-1 data for this run
+    if (initialFailedRows !== null && page === 1) return;
     setFilterTable('');
     setFilterColumn('');
     setFilterDim('');
@@ -106,7 +115,7 @@ export const FailedRowsTab: React.FC<Props> = ({ apiClient, workspaceId, darkMod
           {uniqueDims.map(d => <option key={d} value={d}>{DQ_DIMENSION_LABELS[d]}</option>)}
         </select>
 
-        {loading && <span style={{ fontSize: 12, color: t.muted }}>Loading…</span>}
+        {(loading || preloadLoading) && <span style={{ fontSize: 12, color: t.muted }}>Loading…</span>}
         {error   && <span style={{ fontSize: 12, color: t.fail }}>{error}</span>}
 
         <span style={{ marginLeft: 'auto', fontSize: 12, color: t.subtext }}>
@@ -116,7 +125,7 @@ export const FailedRowsTab: React.FC<Props> = ({ apiClient, workspaceId, darkMod
 
       {/* Table */}
       <div style={{ flex: 1, overflowY: 'auto', background: t.bg }}>
-        {!latestRun && !loading && (
+        {!latestRun && !loading && !preloadLoading && (
           <div style={{ padding: 32, color: t.muted, textAlign: 'center', fontSize: 14 }}>
             No DQ runs found. Run a notebook from the Configure tab first.
             <div style={{ fontSize: 12, marginTop: 8, color: t.subtext }}>Results are stored in the Governly_DQ lakehouse.</div>

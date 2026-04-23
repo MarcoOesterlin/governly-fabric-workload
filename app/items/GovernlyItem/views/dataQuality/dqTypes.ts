@@ -139,4 +139,5 @@ export const LIGHT_THEME: DqTheme = {
 export interface DqPreloadResult {
   runs: DqRunMeta[];
   summaries: Record<string, DqRunSummary>;
+  latestFailedRows?: { rows: DqFailedRow[]; total: number } | null;
 }
