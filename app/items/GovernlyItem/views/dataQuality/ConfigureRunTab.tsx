@@ -2,7 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { WorkloadClientAPI } from '@ms-fabric/workload-client';
 import { v4 as uuidv4 } from 'uuid';
 import { GovernlyApiClient, Lakehouse } from '../../../../clients/GovernlyApiClient';
-import { DqDimension, DQ_ACTIVE_DIMENSIONS, DqTableSelection, DqRunConfig, DARK_THEME, LIGHT_THEME } from './dqTypes';
+import { DqDimension, DQ_ACTIVE_DIMENSIONS, DqTableSelection, DqRunConfig, DQ_DEFAULT_THRESHOLDS, DQ_DIMENSION_LABELS, DARK_THEME, LIGHT_THEME } from './dqTypes';
 import { LakehouseExplorer } from './LakehouseExplorer';
 import { DimensionPicker } from './DimensionPicker';
 
@@ -23,6 +23,10 @@ export const ConfigureRunTab: React.FC<Props> = ({ apiClient, workspaceId, workl
   const [selectedLakehouse, setSelectedLakehouse] = useState<Lakehouse | null>(null);
   const [tableSelection, setTableSelection] = useState<DqTableSelection[]>([]);
   const [dimensions, setDimensions] = useState<DqDimension[]>([...DQ_ACTIVE_DIMENSIONS]);
+  const [thresholds, setThresholds] = useState<Record<DqDimension, number>>({ ...DQ_DEFAULT_THRESHOLDS });
+
+  const setThreshold = (dim: DqDimension, value: number) =>
+    setThresholds(prev => ({ ...prev, [dim]: value }));
 
   // Multi-lakehouse "Select All" mode
   const [allLhConfigs, setAllLhConfigs] = useState<LhConfig[]>([]);
@@ -83,6 +87,7 @@ export const ConfigureRunTab: React.FC<Props> = ({ apiClient, workspaceId, workl
           lakehouseName: lakehouse.displayName,
           tables: tables.filter(tb => tb.columns.length > 0),
           dimensions,
+          thresholds,
         };
         const result = await apiClient.createDqNotebook(config);
         lastUrl = result.webUrl;
@@ -93,7 +98,7 @@ export const ConfigureRunTab: React.FC<Props> = ({ apiClient, workspaceId, workl
       setError(err?.message ?? String(err));
       setRunState('error');
     }
-  }, [apiClient, workspaceId, selectedLakehouse, tableSelection, allLhConfigs, dimensions, canRun]);
+  }, [apiClient, workspaceId, selectedLakehouse, tableSelection, allLhConfigs, dimensions, thresholds, canRun]);
 
   const totalColumns = allLhConfigs.length > 0
     ? allLhConfigs.reduce((sum, c) => sum + c.tables.reduce((s2, tb) => s2 + tb.columns.length, 0), 0)
@@ -167,6 +172,42 @@ export const ConfigureRunTab: React.FC<Props> = ({ apiClient, workspaceId, workl
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px', background: t.bg }}>
           <DimensionPicker selected={dimensions} onChange={setDimensions} />
+
+          {/* Threshold sliders */}
+          {dimensions.length > 0 && (
+            <div style={{ marginTop: 20 }}>
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10, color: t.text }}>
+                3. Set Thresholds
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {dimensions.map(dim => (
+                  <div key={dim}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <span style={{ fontSize: 12, fontWeight: 500, color: t.text }}>{DQ_DIMENSION_LABELS[dim]}</span>
+                      <span style={{
+                        fontSize: 12, fontWeight: 700, minWidth: 38, textAlign: 'right',
+                        color: thresholds[dim] >= 95 ? t.pass : thresholds[dim] >= 80 ? t.warn : t.fail,
+                      }}>
+                        {thresholds[dim]}%
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={50}
+                      max={100}
+                      step={1}
+                      value={thresholds[dim]}
+                      onChange={e => setThreshold(dim, Number(e.target.value))}
+                      style={{ width: '100%', accentColor: t.accent, cursor: 'pointer' }}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: t.subtext, marginTop: 1 }}>
+                      <span>50%</span><span>100%</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Run panel */}

@@ -465,9 +465,9 @@ function registerDqRoutes(app) {
       const notebookJson = buildDqNotebook({
         runId:        config.runId,
         workspaceId:  config.workspaceId,
-        dqLakehouseId,
         lakehouses:   merged.lakehouses,
         dimensions:   merged.dimensions,
+        thresholds:   config.thresholds ?? {},
       });
       const payload = Buffer.from(notebookJson).toString('base64');
 

@@ -42,6 +42,15 @@ export interface DqTableSelection {
   columns: string[];
 }
 
+export const DQ_DEFAULT_THRESHOLDS: Record<DqDimension, number> = {
+  completeness: 95,
+  uniqueness:   95,
+  validity:     98,
+  consistency:  100,
+  timeliness:   100,
+  accuracy:     95,
+};
+
 export interface DqRunConfig {
   runId: string;
   workspaceId: string;
@@ -49,6 +58,7 @@ export interface DqRunConfig {
   lakehouseName: string;
   tables: DqTableSelection[];
   dimensions: DqDimension[];
+  thresholds: Record<DqDimension, number>;
 }
 
 export interface DqResultRow {

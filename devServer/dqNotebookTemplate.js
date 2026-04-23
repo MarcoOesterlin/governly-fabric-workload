@@ -5,12 +5,24 @@
  * @param {object} config
  *   runId       - string (HHMMSS generated at run time, used for cell IDs)
  *   workspaceId - string
- *   dqLakehouseId - string
  *   lakehouses  - Array<{ lakehouseId, lakehouseName, tables: [{tableName, columns}] }>
  *   dimensions  - string[]
+ *
+ * DQ_LAKEHOUSE_ID is resolved dynamically at notebook runtime via the Fabric REST API
+ * (looks up "Governly_DQ" by display name). This means the notebook is portable across
+ * deployments and survives lakehouse delete/recreate without re-pushing.
  */
 function buildDqNotebook(config) {
-  const { runId, workspaceId, dqLakehouseId, lakehouses, dimensions } = config;
+  const { runId, workspaceId, lakehouses, dimensions, thresholds = {} } = config;
+
+  const DEFAULT_THRESHOLDS = {
+    completeness: 95.0,
+    uniqueness:   95.0,
+    validity:     98.0,
+    consistency: 100.0,
+    timeliness:  100.0,
+  };
+  const resolvedThresholds = { ...DEFAULT_THRESHOLDS, ...thresholds };
 
   // Serialise LAKEHOUSE_CONFIGS for Python
   const lhConfigPy = JSON.stringify(
@@ -36,7 +48,7 @@ function buildDqNotebook(config) {
     `# Governly Data Quality Check\n`,
     `\n`,
     `**Source Lakehouses:** ${lhSummary}  \n`,
-    `**DQ Results Lakehouse:** Governly_DQ (\`${dqLakehouseId}\`)  \n`,
+    `**DQ Results Lakehouse:** Governly_DQ (resolved dynamically at runtime)  \n`,
     `**Dimensions:** ${dimensions.join(', ')}  \n`,
     `\n`,
     `Run all cells in order. Results are written to the dedicated **Governly_DQ** lakehouse:\n`,
@@ -47,10 +59,26 @@ function buildDqNotebook(config) {
 
   const configLines = [
     `import json\n`,
+    `import requests as _fab_req\n`,
     `from datetime import datetime\n`,
     `\n`,
-    `WORKSPACE_ID    = "${workspaceId}"\n`,
-    `DQ_LAKEHOUSE_ID = "${dqLakehouseId}"\n`,
+    `WORKSPACE_ID = "${workspaceId}"\n`,
+    `\n`,
+    `# Resolve the Governly_DQ lakehouse ID dynamically — no hardcoded IDs\n`,
+    `def _resolve_dq_lakehouse_id():\n`,
+    `    token = mssparkutils.credentials.getToken("https://api.fabric.microsoft.com")\n`,
+    `    r = _fab_req.get(\n`,
+    `        f"https://api.fabric.microsoft.com/v1/workspaces/{WORKSPACE_ID}/lakehouses",\n`,
+    `        headers={"Authorization": f"Bearer {token}"},\n`,
+    `    )\n`,
+    `    r.raise_for_status()\n`,
+    `    for lh in r.json().get("value", []):\n`,
+    `        if lh["displayName"] == "Governly_DQ":\n`,
+    `            return lh["id"]\n`,
+    `    raise RuntimeError("[DQ] Governly_DQ lakehouse not found. Create it from the Configure tab first.")\n`,
+    `\n`,
+    `DQ_LAKEHOUSE_ID = _resolve_dq_lakehouse_id()\n`,
+    `print(f"[DQ] Resolved DQ lakehouse: Governly_DQ ({DQ_LAKEHOUSE_ID})")\n`,
     `\n`,
     `LOAD_TYPE      = "full"\n`,
     `FRESHNESS_DAYS = 7\n`,
@@ -68,11 +96,11 @@ function buildDqNotebook(config) {
     `DIMENSIONS = ${dimensionsPy}\n`,
     `\n`,
     `THRESHOLDS = {\n`,
-    `    "completeness": 95.0,\n`,
-    `    "uniqueness":   95.0,\n`,
-    `    "validity":     98.0,\n`,
-    `    "consistency": 100.0,\n`,
-    `    "timeliness":  100.0,\n`,
+    `    "completeness": ${resolvedThresholds.completeness.toFixed(1)},\n`,
+    `    "uniqueness":   ${resolvedThresholds.uniqueness.toFixed(1)},\n`,
+    `    "validity":     ${resolvedThresholds.validity.toFixed(1)},\n`,
+    `    "consistency":  ${resolvedThresholds.consistency.toFixed(1)},\n`,
+    `    "timeliness":   ${resolvedThresholds.timeliness.toFixed(1)},\n`,
     `}\n`,
     `\n`,
     `FAILURE_REASONS = {\n`,
