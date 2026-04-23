@@ -46,14 +46,6 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'data-quality', labelKey: 'Nav_DataQuality', defaultLabel: 'Data Quality',   icon: <CheckmarkStarburst24Regular /> },
 ];
 
-// CSS-variable overrides so Fluent Button looks correct on the dark header
-const HEADER_BTN_VARS = {
-  '--colorNeutralForeground1':         'rgba(255,255,255,0.85)',
-  '--colorNeutralForeground1Hover':    '#ffffff',
-  '--colorNeutralForeground1Pressed':  '#ffffff',
-  '--colorNeutralBackground1Hover':    'rgba(255,255,255,0.1)',
-  '--colorNeutralBackground1Pressed':  'rgba(255,255,255,0.18)',
-} as React.CSSProperties;
 
 const useStyles = makeStyles({
   root: {
@@ -135,6 +127,7 @@ const GovernlyItemEditor: React.FC<GovernlyItemEditorProps> = ({ workloadClient 
   const [dataAgentStatus, setDataAgentStatus] = useState<'checking' | 'idle' | 'provisioning' | 'done' | 'error'>('checking');
   const [dataAgentResult, setDataAgentResult] = useState<DataAgentProvisionResult | undefined>();
   const [dataAgentError, setDataAgentError] = useState<string | undefined>();
+  const [showAgentBanner, setShowAgentBanner] = useState(false);
 
   useEffect(() => {
     if (!workspaceId) return;
@@ -144,6 +137,7 @@ const GovernlyItemEditor: React.FC<GovernlyItemEditorProps> = ({ workloadClient 
         if (status.exists) {
           setDataAgentResult({ agentId: status.agentId, agentName: status.agentName, message: `${status.agentName ?? 'Data Agent'} is active` });
           setDataAgentStatus('done');
+          setShowAgentBanner(true);
         } else {
           setDataAgentStatus('idle');
         }
@@ -200,16 +194,16 @@ const GovernlyItemEditor: React.FC<GovernlyItemEditorProps> = ({ workloadClient 
     setDataAgentError(undefined);
     setDataAgentResult(undefined);
     apiClient.provisionDataAgent(workspaceId, 'Governly')
-      .then(result => { setDataAgentResult(result); setDataAgentStatus('done'); })
-      .catch((err: any) => { setDataAgentError(err?.message ?? String(err)); setDataAgentStatus('error'); });
+      .then(result => { setDataAgentResult(result); setDataAgentStatus('done'); setShowAgentBanner(true); })
+      .catch((err: any) => { setDataAgentError(err?.message ?? String(err)); setDataAgentStatus('error'); setShowAgentBanner(true); });
   }, [apiClient, workspaceId, dataAgentStatus]);
 
-  // Auto-dismiss success banner after 4 seconds
+  // Auto-dismiss success banner after 4 seconds (status stays 'done' so button stays correct)
   useEffect(() => {
-    if (dataAgentStatus !== 'done') return undefined;
-    const timer = setTimeout(() => setDataAgentStatus('idle'), 4000);
+    if (!showAgentBanner || dataAgentStatus !== 'done') return undefined;
+    const timer = setTimeout(() => setShowAgentBanner(false), 4000);
     return () => clearTimeout(timer);
-  }, [dataAgentStatus]);
+  }, [showAgentBanner, dataAgentStatus]);
 
   const handleOpenWorkspace = useCallback(() => {
     if (!workspaceId) return;
@@ -229,6 +223,7 @@ const GovernlyItemEditor: React.FC<GovernlyItemEditorProps> = ({ workloadClient 
   }, [workloadClient, workspaceId]);
 
   const agentBusy = dataAgentStatus === 'provisioning' || dataAgentStatus === 'checking';
+  const agentDone = dataAgentStatus === 'done';
 
   const agentButtonLabel =
     dataAgentStatus === 'checking'     ? 'Checking…' :
@@ -276,43 +271,65 @@ const GovernlyItemEditor: React.FC<GovernlyItemEditorProps> = ({ workloadClient 
         <span className={styles.headerTitle}>Governly</span>
 
         {workspaceId && (
-          <Button
-            appearance="subtle"
-            style={HEADER_BTN_VARS}
-            icon={agentBusy ? <Spinner size="extra-tiny" /> : <Bot24Regular />}
+          <button
             onClick={handleProvisionDataAgent}
-            disabled={agentBusy || dataAgentStatus === 'done'}
+            disabled={agentBusy || agentDone}
             title={agentButtonTitle}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '5px 14px', borderRadius: 6, border: 'none',
+              cursor: agentBusy || agentDone ? 'default' : 'pointer',
+              fontSize: 13, fontWeight: 600,
+              color: agentDone ? '#00cc72' : 'white',
+              background: agentDone
+                ? 'rgba(0,204,114,0.18)'
+                : dataAgentStatus === 'error'
+                  ? 'rgba(245,64,90,0.18)'
+                  : 'rgba(0,180,230,0.18)',
+              opacity: agentBusy ? 0.7 : 1,
+              transition: 'background 0.15s',
+            }}
           >
+            {agentBusy
+              ? <Spinner size="extra-tiny" style={{ color: 'white' }} />
+              : <Bot24Regular style={{ fontSize: 16, color: agentDone ? '#00cc72' : 'rgba(255,255,255,0.85)' }} />}
             {agentButtonLabel}
-          </Button>
+          </button>
         )}
 
         {workspaceId && (
-          <Button
-            appearance="subtle"
-            style={HEADER_BTN_VARS}
-            icon={<Open24Regular />}
+          <button
             onClick={handleOpenWorkspace}
             title="Open workspace in Fabric"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '5px 14px', borderRadius: 6, border: 'none',
+              cursor: 'pointer', fontSize: 13, fontWeight: 500,
+              color: 'rgba(255,255,255,0.85)', background: 'transparent',
+            }}
           >
+            <Open24Regular style={{ fontSize: 16 }} />
             Open Workspace
-          </Button>
+          </button>
         )}
 
-        <Button
-          appearance="subtle"
-          style={HEADER_BTN_VARS}
-          icon={<ArrowClockwise24Regular />}
+        <button
           onClick={handleRefresh}
           title={t('Classifier_Ribbon_Refresh', 'Refresh')}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '5px 14px', borderRadius: 6, border: 'none',
+            cursor: 'pointer', fontSize: 13, fontWeight: 500,
+            color: 'rgba(255,255,255,0.85)', background: 'transparent',
+          }}
         >
+          <ArrowClockwise24Regular style={{ fontSize: 16 }} />
           {t('Classifier_Ribbon_Refresh', 'Refresh')}
-        </Button>
+        </button>
       </div>
 
       {/* ── Data Agent notification banner ── */}
-      {(dataAgentStatus === 'done' || dataAgentStatus === 'error') && (
+      {showAgentBanner && (dataAgentStatus === 'done' || dataAgentStatus === 'error') && (
         <MessageBar intent={dataAgentStatus === 'done' ? 'success' : 'error'}>
           <MessageBarBody>
             {dataAgentStatus === 'done'
@@ -321,7 +338,7 @@ const GovernlyItemEditor: React.FC<GovernlyItemEditorProps> = ({ workloadClient 
           </MessageBarBody>
           <MessageBarActions
             containerAction={
-              <Button appearance="transparent" size="small" icon={<Dismiss24Regular />} aria-label="Dismiss" onClick={() => setDataAgentStatus('idle')} />
+              <Button appearance="transparent" size="small" icon={<Dismiss24Regular />} aria-label="Dismiss" onClick={() => setShowAgentBanner(false)} />
             }
           >
             {dataAgentStatus === 'done' && dataAgentResult?.agentId && workspaceId && (
