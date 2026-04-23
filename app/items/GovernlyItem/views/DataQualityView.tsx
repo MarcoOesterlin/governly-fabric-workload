@@ -24,6 +24,7 @@ const STORAGE_KEY = 'governly_dq_dark_mode';
 
 export const DataQualityView: React.FC<Props> = ({ apiClient, workspaceId, workloadClient }) => {
   const [activeTab, setActiveTab] = useState<TabKey>('dashboard');
+  const [drillTable, setDrillTable] = useState<string | undefined>(undefined);
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
     return stored === null ? false : stored === 'true';
@@ -72,7 +73,10 @@ export const DataQualityView: React.FC<Props> = ({ apiClient, workspaceId, workl
           return (
             <button
               key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
+              onClick={() => {
+                if (tab.key !== 'failed') setDrillTable(undefined);
+                setActiveTab(tab.key);
+              }}
               style={{
                 padding: '10px 20px',
                 border: 'none',
@@ -128,6 +132,10 @@ export const DataQualityView: React.FC<Props> = ({ apiClient, workspaceId, workl
             summaries={preload?.summaries ?? {}}
             loading={preloadLoading}
             error={preloadError}
+            onTableClick={(tableName) => {
+              setDrillTable(tableName);
+              setActiveTab('failed');
+            }}
           />
         )}
         {activeTab === 'failed' && (
@@ -138,6 +146,7 @@ export const DataQualityView: React.FC<Props> = ({ apiClient, workspaceId, workl
             initialRuns={preload?.runs ?? []}
             initialFailedRows={preload?.latestFailedRows ?? null}
             preloadLoading={preloadLoading}
+            initialTableFilter={drillTable}
           />
         )}
       </div>

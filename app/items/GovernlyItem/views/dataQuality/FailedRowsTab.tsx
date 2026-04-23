@@ -9,11 +9,13 @@ interface Props {
   initialRuns: DqRunMeta[];
   initialFailedRows: { rows: DqFailedRow[]; total: number } | null;
   preloadLoading: boolean;
+  /** Pre-select a table filter when navigating here from Table Health */
+  initialTableFilter?: string;
 }
 
 const PAGE_SIZE = 50;
 
-export const FailedRowsTab: React.FC<Props> = ({ apiClient, workspaceId, darkMode, initialRuns, initialFailedRows, preloadLoading }) => {
+export const FailedRowsTab: React.FC<Props> = ({ apiClient, workspaceId, darkMode, initialRuns, initialFailedRows, preloadLoading, initialTableFilter }) => {
   const t = darkMode ? DARK_THEME : LIGHT_THEME;
 
   const [runs, setRuns]         = useState<DqRunMeta[]>(initialRuns);
@@ -22,9 +24,17 @@ export const FailedRowsTab: React.FC<Props> = ({ apiClient, workspaceId, darkMod
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState<string | null>(null);
 
-  const [filterTable, setFilterTable]   = useState('');
+  const [filterTable, setFilterTable]   = useState(initialTableFilter ?? '');
   const [filterColumn, setFilterColumn] = useState('');
   const [filterDim, setFilterDim]       = useState('');
+
+  // Apply drill-through when initialTableFilter changes (navigation from Dashboard)
+  useEffect(() => {
+    setFilterTable(initialTableFilter ?? '');
+    setFilterColumn('');
+    setFilterDim('');
+    setPage(1);
+  }, [initialTableFilter]);
 
   // Sync when preloaded data arrives (contains all rows now)
   useEffect(() => { setRuns(initialRuns); }, [initialRuns]);
