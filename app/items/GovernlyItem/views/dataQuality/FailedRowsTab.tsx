@@ -48,8 +48,9 @@ export const FailedRowsTab: React.FC<Props> = ({
   const preloadRef = useRef(initialFailedRows);
   preloadRef.current = initialFailedRows;
 
-  // Track which run's rows are in allRows; prevents redundant fetches
-  const lastLoadedRunRef = useRef<string>(startsOnLatest ? startRunId : '');
+  // Track which run's rows are in allRows; prevents redundant fetches.
+  // Only mark as loaded if preload actually provided rows — otherwise fetch from API.
+  const lastLoadedRunRef = useRef<string>(startsOnLatest && initialFailedRows !== null ? startRunId : '');
 
   // Sync runs list when preload arrives
   useEffect(() => { setRuns(initialRuns); }, [initialRuns]);

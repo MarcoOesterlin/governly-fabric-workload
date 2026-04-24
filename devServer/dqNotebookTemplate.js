@@ -221,6 +221,7 @@ function buildDqNotebook(config) {
   const runChecksLines = [
     `all_results     = []\n`,
     `all_failed_rows = []\n`,
+    `_table_row_counts = {}  # per-table row cap so no single table starves others\n`,
     `\n`,
     `for lh_cfg in LAKEHOUSE_CONFIGS:\n`,
     `    lh_id   = lh_cfg["lakehouse_id"]\n`,
@@ -260,7 +261,8 @@ function buildDqNotebook(config) {
     `                    if failed_df is not None:\n`,
     `                        try:\n`,
     `                            for row in failed_df.collect():\n`,
-    `                                if len(all_failed_rows) >= 2000: break\n`,
+    `                                if _table_row_counts.get(table_name, 0) >= 200: break\n`,
+    `                                _table_row_counts[table_name] = _table_row_counts.get(table_name, 0) + 1\n`,
     `                                all_failed_rows.append({\n`,
     `                                    "run_id": run_id, "load_type": LOAD_TYPE,\n`,
     `                                    "year": year, "month": month, "day": day,\n`,
