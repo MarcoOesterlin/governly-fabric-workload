@@ -97,6 +97,7 @@ function registerDevServerApis(app) {
     try {
       res.json(spProvisioning.getConsentUrl());
     } catch (err) {
+      console.error('[SpConsentUrl] Error:', err.message);
       res.status(500).json({ error: err.message });
     }
   });
