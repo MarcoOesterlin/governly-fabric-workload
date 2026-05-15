@@ -225,6 +225,44 @@ function getConsentUrl() {
   return { url, bootstrapUrl: url };
 }
 
+// ── Key Vault ensure (create if missing) ───────────────────────────────────
+
+async function ensureVault(vaultName) {
+  const existing = await readVaultSecret(vaultName);
+  if (existing.vaultExists) return { vaultName, created: false };
+
+  const subscriptionId = process.env.AZURE_SUBSCRIPTION_ID;
+  const resourceGroup = process.env.AZURE_RESOURCE_GROUP;
+  if (!subscriptionId || !resourceGroup) {
+    throw new Error(
+      `Key Vault "${vaultName}" does not exist and AZURE_SUBSCRIPTION_ID / ` +
+      `AZURE_RESOURCE_GROUP are not set in .env.dev. Either create the vault ` +
+      `manually or set both env vars to enable auto-provisioning.`
+    );
+  }
+
+  const { KeyVaultManagementClient } = require('@azure/arm-keyvault');
+  const tenantId = getTenantId();
+  const kvMgmt = new KeyVaultManagementClient(getCredential(), subscriptionId);
+
+  console.log(`[SP] Creating Key Vault "${vaultName}" in ${resourceGroup}...`);
+  await kvMgmt.vaults.beginCreateOrUpdateAndWait(resourceGroup, vaultName, {
+    location: process.env.AZURE_LOCATION || 'westeurope',
+    properties: {
+      tenantId,
+      sku: { family: 'A', name: 'standard' },
+      enableRbacAuthorization: true,
+      accessPolicies: [],
+    },
+  });
+  console.log(
+    `[SP] Vault "${vaultName}" created. ` +
+    `NOTE: an RBAC role (Key Vault Secrets Officer) must be assigned to your ` +
+    `signed-in identity / app SP before secrets can be written.`
+  );
+  return { vaultName, created: true };
+}
+
 module.exports = {
   REQUIRED_GRAPH_PERMISSIONS,
   BOOTSTRAP_PERMISSION,
@@ -243,4 +281,5 @@ module.exports = {
   listGrantedGraphRoleIds,
   getSpStatus,
   getConsentUrl,
+  ensureVault,
 };
