@@ -85,6 +85,25 @@ export interface LabelSuggestionsResult {
   suggestions: LabelSuggestion[];
 }
 
+export interface SpPermissionStatus {
+  name: string;
+  granted: boolean;
+}
+
+export interface SpStatus {
+  bootstrapGranted: boolean;
+  vaultExists: boolean;
+  vaultName: string;
+  secretExpiry: string | null;
+  daysRemaining: number | null;
+  permissions: SpPermissionStatus[];
+}
+
+export interface SpConsentUrls {
+  url: string;
+  bootstrapUrl: string;
+}
+
 /**
  * GovernlyApiClient
  *
@@ -418,6 +437,26 @@ export class GovernlyApiClient {
     }
 
     return response.json() as Promise<LabelSuggestionsResult>;
+  }
+
+  // ── Service Principal ────────────────────────────────────────────────────
+
+  async getSpStatus(): Promise<SpStatus> {
+    const resp = await fetch('/api/sp-status');
+    if (!resp.ok) throw new Error(`getSpStatus failed (${resp.status}): ${await resp.text()}`);
+    return resp.json() as Promise<SpStatus>;
+  }
+
+  async provisionSp(): Promise<SpStatus> {
+    const resp = await fetch('/api/sp-setup', { method: 'POST' });
+    if (!resp.ok) throw new Error(`provisionSp failed (${resp.status}): ${await resp.text()}`);
+    return resp.json() as Promise<SpStatus>;
+  }
+
+  async getSpConsentUrl(): Promise<SpConsentUrls> {
+    const resp = await fetch('/api/sp-consent-url');
+    if (!resp.ok) throw new Error(`getSpConsentUrl failed (${resp.status}): ${await resp.text()}`);
+    return resp.json() as Promise<SpConsentUrls>;
   }
 
   // ── Data Quality ─────────────────────────────────────────────────────────────
