@@ -27,6 +27,7 @@ export const SpProvisionModal: React.FC<SpProvisionModalProps> = ({
   const [status, setStatus] = useState<SpStatus | null>(initialStatus);
   const [phase, setPhase] = useState<Phase>('idle');
   const [errorMsg, setErrorMsg] = useState<string | undefined>();
+  const [consentOpened, setConsentOpened] = useState(false);
 
   React.useEffect(() => { setStatus(initialStatus); }, [initialStatus]);
 
@@ -34,6 +35,7 @@ export const SpProvisionModal: React.FC<SpProvisionModalProps> = ({
     if (open) {
       setPhase('idle');
       setErrorMsg(undefined);
+      setConsentOpened(false);
     }
   }, [open]);
 
@@ -67,10 +69,16 @@ export const SpProvisionModal: React.FC<SpProvisionModalProps> = ({
     try {
       const urls = await apiClient.getSpConsentUrl();
       await workloadClient.navigation.openBrowserTab({ url: urls.url });
+      setConsentOpened(true);
     } catch (e: unknown) {
       setErrorMsg(e instanceof Error ? e.message : String(e));
     }
   }, [apiClient, workloadClient]);
+
+  const handleCheckAgain = useCallback(async () => {
+    setConsentOpened(false);
+    await refreshStatus();
+  }, [refreshStatus]);
 
   const renderBootstrap = () => (
     <>
@@ -80,11 +88,20 @@ export const SpProvisionModal: React.FC<SpProvisionModalProps> = ({
           Governly can manage its own secrets and permissions.
         </MessageBarBody>
       </MessageBar>
+      {consentOpened && (
+        <MessageBar intent="info" style={{ marginTop: 12 }}>
+          <MessageBarBody>
+            After approving consent in the browser tab, come back here and click <strong>Check Again</strong>.
+          </MessageBarBody>
+        </MessageBar>
+      )}
       <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
-        <Button appearance="primary" icon={<Open24Regular />} onClick={openConsent}>
-          Open Admin Consent URL
+        <Button appearance={consentOpened ? 'secondary' : 'primary'} icon={<Open24Regular />} onClick={openConsent}>
+          {consentOpened ? 'Re-open Consent URL' : 'Open Admin Consent URL'}
         </Button>
-        <Button onClick={refreshStatus}>Check Again</Button>
+        <Button appearance={consentOpened ? 'primary' : 'secondary'} onClick={handleCheckAgain}>
+          Check Again
+        </Button>
       </div>
     </>
   );
