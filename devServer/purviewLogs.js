@@ -1,11 +1,28 @@
 'use strict';
 
+/**
+ * Purview Audit Log backend
+ *
+ * Wraps the Microsoft Graph Security async Audit Log API
+ * (POST query → poll until succeeded → paginate records).
+ * Exports:
+ *   queryFabricActivity(workspaceId, days?)    → { records, queryDays, partial }
+ *   queryDataAgentActivity(workspaceId, days?) → { entries, queryDays, partial }
+ * Both functions degrade gracefully — partial:true on any failure.
+ */
+
 const https = require('https');
 const { acquireGraphTokenViaClientCredentials, acquireFabricToken } = require('./governlyProxy');
 
 const GRAPH_BASE  = 'https://graph.microsoft.com/v1.0';
 const FABRIC_BASE = 'https://api.fabric.microsoft.com/v1';
 
+/**
+ * Minimal JSON-over-HTTPS helper.
+ * @param {string} url
+ * @param {{ method?: string; token: string; body?: object }} opts
+ * @returns {Promise<{ status: number; ok: boolean; data: any }>}
+ */
 async function jsonRequest(url, { method = 'GET', token, body } = {}) {
   return new Promise((resolve, reject) => {
     const parsed  = new URL(url);
@@ -23,13 +40,13 @@ async function jsonRequest(url, { method = 'GET', token, body } = {}) {
       headers,
     };
     const req = https.request(reqOpts, res => {
-      req.setTimeout(30_000, () => req.destroy(new Error(`Request timed out: ${parsed.hostname}${parsed.pathname}`)));
-      let raw = '';
-      res.on('data', chunk => { raw += chunk; });
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
       res.on('error', reject);
       res.on('end', () => {
+        const text = Buffer.concat(chunks).toString();
         let data;
-        try { data = JSON.parse(raw); } catch { data = raw; }
+        try { data = JSON.parse(text); } catch { data = text; }
         resolve({ status: res.statusCode, ok: res.statusCode >= 200 && res.statusCode < 300, data });
       });
     });
@@ -129,6 +146,7 @@ function normaliseRecord(raw) {
   };
 }
 
+// 'GetItem' intentionally omitted — fires on every read, not just sharing/export events
 const FABRIC_OPERATIONS = [
   'ExportArtifact', 'ExportDataflow', 'ShareReport', 'ShareDashboard',
   'DownloadReport', 'PublishToWebReport', 'ExportReport', 'SendEmailToConsumer',
@@ -198,7 +216,9 @@ async function queryDataAgentActivity(workspaceId, days = 30) {
     ]);
 
     const agentIds  = new Set(agents.map(a => (a.id ?? '').toLowerCase()));
-    const agentById = Object.fromEntries(agents.map(a => [a.id?.toLowerCase(), a.displayName]));
+    const agentById = Object.fromEntries(
+      agents.filter(a => a.id).map(a => [a.id.toLowerCase(), a.displayName])
+    );
 
     const status = await pollAuditQuery(token, queryId, 60_000);
     if (status === 'failed') {
