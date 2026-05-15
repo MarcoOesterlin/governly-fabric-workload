@@ -24,6 +24,7 @@ import {
 } from '@fluentui/react-components';
 
 import { GovernlyApiClient, FabricItem, SensitivityLabel, DataAgentProvisionResult } from '../../clients/GovernlyApiClient';
+import { SpStatusBadge } from './components/SpStatusBadge';
 import { callGetItem } from '../../controller/ItemCRUDController';
 import { ItemsView } from './views/ItemsView';
 import { DataQualityView } from './views/DataQualityView';
@@ -297,6 +298,8 @@ const GovernlyItemEditor: React.FC<GovernlyItemEditorProps> = ({ workloadClient 
             {agentButtonLabel}
           </button>
         )}
+
+        <SpStatusBadge apiClient={apiClient} />
 
         {workspaceId && (
           <button
