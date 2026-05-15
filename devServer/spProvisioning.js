@@ -132,6 +132,78 @@ async function resolveOurServicePrincipalId(graphToken) {
   return resp.body?.value?.[0]?.id || null;
 }
 
+// ── Status check ────────────────────────────────────────────────────────────
+
+async function readVaultSecret(vaultName) {
+  try {
+    const credential = new DefaultAzureCredential();
+    const client = new SecretClient(`https://${vaultName}.vault.azure.net`, credential);
+    const secret = await client.getSecret(SECRET_NAME);
+    return {
+      vaultExists: true,
+      expiresOn: secret.properties.expiresOn ? secret.properties.expiresOn.toISOString() : null,
+      keyId: secret.properties.tags?.keyId || null,
+    };
+  } catch (err) {
+    if (err.code === 'SecretNotFound' || err.statusCode === 404) {
+      return { vaultExists: true, expiresOn: null, keyId: null };
+    }
+    if (err.code === 'VaultNotFound' || err.statusCode === 404 || /not found/i.test(err.message || '')) {
+      return { vaultExists: false, expiresOn: null, keyId: null };
+    }
+    throw err;
+  }
+}
+
+/**
+ * Lists Graph appRoleAssignments granted to our SP and returns a Set of granted appRoleIds.
+ * Returns an empty Set if our SP doesn't exist yet (which means nothing is consented).
+ */
+async function listGrantedGraphRoleIds(graphToken) {
+  const ourSpId = await resolveOurServicePrincipalId(graphToken);
+  if (!ourSpId) return new Set();
+  const graphSpId = await resolveGraphServicePrincipalId(graphToken);
+  const url = `https://graph.microsoft.com/v1.0/servicePrincipals/${ourSpId}/appRoleAssignments?$top=999`;
+  const resp = await httpJson(url, { token: graphToken });
+  if (!resp.ok) throw new Error(`Failed to list app role assignments: ${resp.status} ${resp.raw.slice(0, 300)}`);
+  const granted = new Set();
+  for (const a of resp.body?.value ?? []) {
+    if (a.resourceId === graphSpId) granted.add(a.appRoleId);
+  }
+  return granted;
+}
+
+async function getSpStatus() {
+  const graphToken = await acquireGraphTokenViaClientCredentials();
+  const vaultName = getVaultName();
+
+  const [vaultInfo, grantedRoleIds] = await Promise.all([
+    readVaultSecret(vaultName),
+    listGrantedGraphRoleIds(graphToken).catch(() => new Set()),
+  ]);
+
+  const bootstrapGranted = grantedRoleIds.has(BOOTSTRAP_PERMISSION.id);
+  const permissions = REQUIRED_GRAPH_PERMISSIONS.map(p => ({
+    name: p.name,
+    granted: grantedRoleIds.has(p.id),
+  }));
+
+  let daysRemaining = null;
+  if (vaultInfo.expiresOn) {
+    const ms = new Date(vaultInfo.expiresOn).getTime() - Date.now();
+    daysRemaining = Math.floor(ms / (1000 * 60 * 60 * 24));
+  }
+
+  return {
+    bootstrapGranted,
+    vaultExists: vaultInfo.vaultExists,
+    vaultName,
+    secretExpiry: vaultInfo.expiresOn,
+    daysRemaining,
+    permissions,
+  };
+}
+
 module.exports = {
   REQUIRED_GRAPH_PERMISSIONS,
   BOOTSTRAP_PERMISSION,
@@ -146,4 +218,7 @@ module.exports = {
   resolveGraphServicePrincipalId,
   resolveOurServicePrincipalId,
   invalidateClientSecretCache,
+  readVaultSecret,
+  listGrantedGraphRoleIds,
+  getSpStatus,
 };
