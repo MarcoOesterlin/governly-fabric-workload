@@ -72,7 +72,7 @@ export const DataAgentLogsView: React.FC<DataAgentLogsViewProps> = ({ workspaceI
     return {
       uniqueAgents: Object.keys(counts).sort(),
       agentCounts : counts,
-      filtered    : entries.filter(e => !filterAgent || e.agentName === filterAgent || e.agentId === filterAgent),
+      filtered    : entries.filter(e => !filterAgent || (e.agentName || e.agentId || '') === filterAgent),
     };
   }, [report, filterAgent]);
 
@@ -160,7 +160,7 @@ export const DataAgentLogsView: React.FC<DataAgentLogsViewProps> = ({ workspaceI
                 {filtered.map(entry => (
                   <tr
                     key={entry.id}
-                    style={{ background: hoveredRowId === entry.id ? tokens.colorNeutralBackground2 : '' }}
+                    style={{ transition: 'background 0.1s', background: hoveredRowId === entry.id ? tokens.colorNeutralBackground2 : '' }}
                     onMouseEnter={() => setHoveredRowId(entry.id)}
                     onMouseLeave={() => setHoveredRowId(null)}
                   >
