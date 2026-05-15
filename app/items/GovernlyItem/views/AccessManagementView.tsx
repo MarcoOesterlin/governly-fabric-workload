@@ -159,11 +159,11 @@ const MembersTable: React.FC<MembersTableProps> = ({ members, revoking, onRevoke
               <Button
                 size="small"
                 appearance="subtle"
-                icon={revoking.has(member.id) ? <Spinner size="tiny" /> : undefined}
-                disabled={revoking.has(member.id)}
+               icon={revoking.has(`${member.groupId}:${member.id}`) ? <Spinner size="tiny" /> : undefined}
+               disabled={revoking.has(`${member.groupId}:${member.id}`)}
                 onClick={() => onRevoke(member.groupId, member.id)}
               >
-                {revoking.has(member.id) ? 'Revoking…' : 'Revoke'}
+               {revoking.has(`${member.groupId}:${member.id}`) ? 'Revoking…' : 'Revoke'}
               </Button>
             </td>
           </tr>
@@ -283,7 +283,7 @@ export const AccessManagementView: React.FC<AccessManagementViewProps> = ({ work
   }, []);
 
   const handleRevoke = useCallback(async (groupId: string, memberId: string) => {
-    setRevoking(prev => new Set(prev).add(memberId));
+    setRevoking(prev => new Set(prev).add(`${groupId}:${memberId}`));
     try {
       await client.revokeGroupMember(groupId, memberId);
       // Optimistic removal
@@ -302,7 +302,7 @@ export const AccessManagementView: React.FC<AccessManagementViewProps> = ({ work
     } finally {
       setRevoking(prev => {
         const next = new Set(prev);
-        next.delete(memberId);
+        next.delete(`${groupId}:${memberId}`);
         return next;
       });
     }
