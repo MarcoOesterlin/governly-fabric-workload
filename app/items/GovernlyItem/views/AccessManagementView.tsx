@@ -283,6 +283,7 @@ export const AccessManagementView: React.FC<AccessManagementViewProps> = ({ work
   }, []);
 
   const handleRevoke = useCallback(async (groupId: string, memberId: string) => {
+    setRevokeError(null);
     setRevoking(prev => new Set(prev).add(`${groupId}:${memberId}`));
     try {
       await client.revokeGroupMember(groupId, memberId);
