@@ -12,6 +12,7 @@ const { suggestLabels } = require('./labelSuggester');
 const { registerDqRoutes } = require('./dqRoutes');
 const accessManagement = require('./accessManagement');
 const purviewLogs = require('./purviewLogs');
+const oversharingReport = require('./oversharingReport');
 
 /**
  * Register dev server manifest APIs with an Express application
@@ -95,9 +96,9 @@ function registerDevServerApis(app) {
     }
   });
 
-  app.get('/api/sp-consent-url', (_req, res) => {
+  app.get('/api/sp-consent-url', async (_req, res) => {
     try {
-      res.json(spProvisioning.getConsentUrl());
+      res.json(await spProvisioning.getConsentUrl());
     } catch (err) {
       console.error('[SpConsentUrl] Error:', err.message);
       res.status(500).json({ error: err.message });
@@ -134,6 +135,32 @@ function registerDevServerApis(app) {
       res.status(204).end();
     } catch (err) {
       console.error('[AccessRevoke] Error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/oversharing/report', async (req, res) => {
+    const { workspaceId } = req.query;
+    if (!workspaceId) return res.status(400).json({ error: 'Query param "workspaceId" is required.' });
+    try {
+      const report = await oversharingReport.buildOversharingReport(workspaceId);
+      res.json(report);
+    } catch (err) {
+      console.error('[Oversharing] Error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/oversharing/item-user', async (req, res) => {
+    const { workspaceId, itemId, userIdentifier } = req.query;
+    if (!workspaceId || !itemId || !userIdentifier) {
+      return res.status(400).json({ error: 'Query params "workspaceId", "itemId", and "userIdentifier" are required.' });
+    }
+    try {
+      await oversharingReport.revokeItemUser(workspaceId, itemId, userIdentifier);
+      res.status(204).end();
+    } catch (err) {
+      console.error('[OversharingRevoke] Error:', err.message);
       res.status(500).json({ error: err.message });
     }
   });
