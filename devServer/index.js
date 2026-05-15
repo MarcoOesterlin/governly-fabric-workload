@@ -11,6 +11,7 @@ const { provisionDataAgent, httpRequest } = require('./dataAgentProvisioner');
 const { suggestLabels } = require('./labelSuggester');
 const { registerDqRoutes } = require('./dqRoutes');
 const accessManagement = require('./accessManagement');
+const purviewLogs = require('./purviewLogs');
 
 /**
  * Register dev server manifest APIs with an Express application
@@ -133,6 +134,30 @@ function registerDevServerApis(app) {
       res.status(204).end();
     } catch (err) {
       console.error('[AccessRevoke] Error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/audit/fabric-activity', async (req, res) => {
+    const { workspaceId, days } = req.query;
+    if (!workspaceId) return res.status(400).json({ error: 'Query param "workspaceId" is required.' });
+    try {
+      const report = await purviewLogs.queryFabricActivity(workspaceId, days ? Number(days) : 30);
+      res.json(report);
+    } catch (err) {
+      console.error('[FabricAudit] Error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/audit/data-agent-logs', async (req, res) => {
+    const { workspaceId, days } = req.query;
+    if (!workspaceId) return res.status(400).json({ error: 'Query param "workspaceId" is required.' });
+    try {
+      const report = await purviewLogs.queryDataAgentActivity(workspaceId, days ? Number(days) : 30);
+      res.json(report);
+    } catch (err) {
+      console.error('[DataAgentLogs] Error:', err.message);
       res.status(500).json({ error: err.message });
     }
   });
