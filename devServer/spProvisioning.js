@@ -216,6 +216,15 @@ async function getSpStatus() {
   };
 }
 
+// ── Consent URL ─────────────────────────────────────────────────────────────
+
+function getConsentUrl() {
+  const tenantId = getTenantId();
+  const clientId = getClientId();
+  const url = `https://login.microsoftonline.com/${tenantId}/adminconsent?client_id=${clientId}`;
+  return { url, bootstrapUrl: url };
+}
+
 module.exports = {
   REQUIRED_GRAPH_PERMISSIONS,
   BOOTSTRAP_PERMISSION,
@@ -233,4 +242,5 @@ module.exports = {
   readVaultSecret,
   listGrantedGraphRoleIds,
   getSpStatus,
+  getConsentUrl,
 };
