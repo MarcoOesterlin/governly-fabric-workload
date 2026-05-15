@@ -73,9 +73,9 @@ async function buildGrantorMap(workspaceId) {
     const report = await purviewLogs.queryFabricActivity(workspaceId, 90);
     const map = new Map();
     for (const record of report.records ?? []) {
-      if (!record.operation || !record.operation.toLowerCase().includes('share')) continue;
-      const itemId = record.itemId ?? record.artifactId;
-      const userId = record.userId ?? record.targetUserId;
+      if (!record.operationName || !record.operationName.toLowerCase().includes('share')) continue;
+      const itemId = record.itemId;
+      const userId = record.userId;
       if (!itemId || !userId) continue;
       if (!map.has(itemId)) map.set(itemId, new Map());
       const inner = map.get(itemId);
@@ -102,13 +102,8 @@ function computeFlags(users, item) {
   return { hasDirectGrants, hasExternalUsers, unlabeledWithGrants, highAccessCount };
 }
 
-async function buildOversharingReport(workspaceId) {
-  const [rawItems, grantorMap] = await Promise.all([
-    getAllItems(workspaceId),
-    buildGrantorMap(workspaceId),
-  ]);
-
-  const items = await Promise.all(rawItems.map(async (raw) => {
+async function processItem(raw, workspaceId, grantorMap) {
+  try {
     const users = await getItemUsers(workspaceId, raw.id);
     const itemGrantors = grantorMap.get(raw.id) ?? new Map();
     const flags = computeFlags(users, raw);
@@ -140,7 +135,33 @@ async function buildOversharingReport(workspaceId) {
       users: mappedUsers,
       flags,
     };
-  }));
+  } catch (err) {
+    console.warn(`[Oversharing] Failed to process item ${raw.id}:`, err.message);
+    return {
+      id: raw.id,
+      displayName: raw.displayName,
+      type: raw.type,
+      labelId: null,
+      labelName: null,
+      users: [],
+      flags: { hasDirectGrants: false, hasExternalUsers: false, unlabeledWithGrants: false, highAccessCount: false },
+    };
+  }
+}
+
+async function buildOversharingReport(workspaceId) {
+  const [rawItems, grantorMap] = await Promise.all([
+    getAllItems(workspaceId),
+    buildGrantorMap(workspaceId),
+  ]);
+
+  const BATCH_SIZE = 20;
+  const items = [];
+  for (let i = 0; i < rawItems.length; i += BATCH_SIZE) {
+    const batch = rawItems.slice(i, i + BATCH_SIZE);
+    const results = await Promise.all(batch.map(raw => processItem(raw, workspaceId, grantorMap)));
+    items.push(...results);
+  }
 
   return { items, generatedAt: new Date().toISOString() };
 }
