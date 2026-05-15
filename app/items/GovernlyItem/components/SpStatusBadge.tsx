@@ -35,7 +35,8 @@ export const SpStatusBadge: React.FC<SpStatusBadgeProps> = ({ apiClient }) => {
     setLoading(true);
     try {
       setStatus(await apiClient.getSpStatus());
-    } catch {
+    } catch (e: unknown) {
+      console.error('[SpStatusBadge] getSpStatus failed:', e);
       setStatus(null);
     } finally {
       setLoading(false);
@@ -62,6 +63,8 @@ export const SpStatusBadge: React.FC<SpStatusBadgeProps> = ({ apiClient }) => {
     return 'No client secret in Key Vault';
   })();
 
+  const handleStatusChange = useCallback((s: SpStatus) => setStatus(s), []);
+
   return (
     <>
       <button
@@ -79,7 +82,7 @@ export const SpStatusBadge: React.FC<SpStatusBadgeProps> = ({ apiClient }) => {
           ? <Spinner size="extra-tiny" />
           : <ShieldCheckmark24Regular style={{ fontSize: 16, color: '#0078d4' }} />}
         <span
-          aria-label={`status: ${color}`}
+          aria-hidden="true"
           style={{
             display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
             background: COLOR_HEX[color],
@@ -92,7 +95,7 @@ export const SpStatusBadge: React.FC<SpStatusBadgeProps> = ({ apiClient }) => {
         apiClient={apiClient}
         initialStatus={status}
         onClose={() => setOpen(false)}
-        onStatusChange={(s) => setStatus(s)}
+        onStatusChange={handleStatusChange}
       />
     </>
   );

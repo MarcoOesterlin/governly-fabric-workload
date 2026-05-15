@@ -28,11 +28,20 @@ export const SpProvisionModal: React.FC<SpProvisionModalProps> = ({
 
   React.useEffect(() => { setStatus(initialStatus); }, [initialStatus]);
 
+  React.useEffect(() => {
+    if (open) {
+      setPhase('idle');
+      setErrorMsg(undefined);
+    }
+  }, [open]);
+
   const refreshStatus = useCallback(async () => {
     try {
       const fresh = await apiClient.getSpStatus();
       setStatus(fresh);
       onStatusChange(fresh);
+      setPhase('idle');
+      setErrorMsg(undefined);
     } catch (e: unknown) {
       setErrorMsg(e instanceof Error ? e.message : String(e));
     }
