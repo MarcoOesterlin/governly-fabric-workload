@@ -76,7 +76,9 @@ function httpJson(url, { method = 'GET', token, body, timeoutMs = 30_000 } = {})
       res.on('end', () => {
         const raw = Buffer.concat(chunks).toString();
         let parsed = null;
-        try { parsed = raw ? JSON.parse(raw) : null; } catch {}
+        try { parsed = raw ? JSON.parse(raw) : null; } catch (e) {
+          console.warn(`[httpJson] JSON parse failed for ${method} ${url}:`, e.message);
+        }
         resolve({
           ok: res.statusCode >= 200 && res.statusCode < 300,
           status: res.statusCode,
@@ -272,6 +274,9 @@ async function ensureVault(vaultName) {
     }
     throw err;
   }
+  if (!process.env.KEYVAULT_NAME) {
+    console.log(`[SP] Add KEYVAULT_NAME=${vaultName} to .env.dev to enable the proxy.`);
+  }
   console.log(
     `[SP] Vault "${vaultName}" created. URI: ${vault?.properties?.vaultUri}. ` +
     `NOTE: an RBAC role (Key Vault Secrets Officer) must be assigned to your ` +
@@ -323,8 +328,8 @@ async function _provisionSpInner() {
   if (!addPwResp.ok) {
     throw new Error(`addPassword failed: ${addPwResp.status} ${addPwResp.raw.slice(0, 400)}`);
   }
-  const newSecretText = addPwResp.body.secretText;
-  const newKeyId = addPwResp.body.keyId;
+  const newSecretText = addPwResp.body?.secretText;
+  const newKeyId = addPwResp.body?.keyId;
   if (!newSecretText || !newKeyId) {
     throw new Error('addPassword returned no secretText / keyId.');
   }
