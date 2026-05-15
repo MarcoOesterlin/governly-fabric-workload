@@ -58,17 +58,23 @@ async function jsonRequest(url, { method = 'GET', token, body } = {}) {
 
 /**
  * Returns raw Fabric workspace role assignments.
+ * Paginates through all results via @odata.nextLink.
  * @param {string} workspaceId
  * @returns {Promise<Array<{id,role,principal:{id,displayName,type,userPrincipalName}}>>}
  */
 async function getWorkspaceRoles(workspaceId) {
   const token = acquireFabricToken();
-  const url = `${FABRIC_BASE}/workspaces/${encodeURIComponent(workspaceId)}/roleAssignments`;
-  const result = await jsonRequest(url, { token });
-  if (!result.ok) {
-    throw new Error(`Fabric roleAssignments failed (${result.status}): ${JSON.stringify(result.data).slice(0, 300)}`);
+  let url = `${FABRIC_BASE}/workspaces/${encodeURIComponent(workspaceId)}/roleAssignments`;
+  const allAssignments = [];
+  while (url) {
+    const result = await jsonRequest(url, { method: 'GET', token });
+    if (!result.ok) {
+      throw new Error(`Fabric roleAssignments failed (${result.status}) for workspace ${workspaceId}`);
+    }
+    allAssignments.push(...(result.data.value ?? []));
+    url = result.data['@odata.nextLink'] ?? null;
   }
-  return result.data.value ?? [];
+  return allAssignments;
 }
 
 /**
@@ -110,6 +116,10 @@ async function getGroupMembers(groupId) {
  * @returns {Promise<Map<string, string>>}   memberId → addedAt
  */
 async function getGroupAuditDates(groupId) {
+  if (!/^[0-9a-f-]{36}$/i.test(groupId)) {
+    console.warn(`getGroupAuditDates: invalid groupId format: ${groupId}`);
+    return new Map();
+  }
   const token = await acquireGraphTokenViaClientCredentials();
   const filter =
     `activityDisplayName eq 'Add member to group'` +
