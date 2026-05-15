@@ -54,8 +54,9 @@ function getVaultName() {
   return process.env.KEYVAULT_NAME || `governly-${getTenantId().slice(0, 8)}`;
 }
 
-/** Minimal HTTPS request helper returning { ok, status, body }. */
-function httpJson(url, { method = 'GET', token, body } = {}) {
+/** Minimal HTTPS request helper returning { ok, status, body, raw }. */
+function httpJson(url, { method = 'GET', token, body, timeoutMs = 30_000 } = {}) {
+  if (!token) throw new Error(`httpJson: token is required (called for ${method} ${url})`);
   return new Promise((resolve, reject) => {
     const u = new URL(url);
     const data = body !== undefined ? JSON.stringify(body) : undefined;
@@ -63,14 +64,15 @@ function httpJson(url, { method = 'GET', token, body } = {}) {
       hostname: u.hostname,
       path: u.pathname + (u.search || ''),
       method,
+      timeout: timeoutMs,
       headers: {
         Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        ...(data ? { 'Content-Length': String(Buffer.byteLength(data)) } : {}),
+        ...(data ? { 'Content-Type': 'application/json', 'Content-Length': String(Buffer.byteLength(data)) } : {}),
       },
     }, (res) => {
       const chunks = [];
       res.on('data', c => chunks.push(c));
+      res.on('error', reject);
       res.on('end', () => {
         const raw = Buffer.concat(chunks).toString();
         let parsed = null;
@@ -82,6 +84,9 @@ function httpJson(url, { method = 'GET', token, body } = {}) {
           raw,
         });
       });
+    });
+    req.on('timeout', () => {
+      req.destroy(new Error(`httpJson timed out after ${timeoutMs}ms: ${method} ${url}`));
     });
     req.on('error', reject);
     if (data) req.write(data);
