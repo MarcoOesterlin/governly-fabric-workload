@@ -9,6 +9,7 @@ import {
 } from '@fluentui/react-components';
 import { ArrowClockwise24Regular } from '@fluentui/react-icons';
 import { GovernlyApiClient, AuditRecord, FabricAuditReport } from '../../../clients/GovernlyApiClient';
+import { formatDateTime, DAY_OPTIONS, thStyle, tdStyle } from './auditShared';
 
 interface PurviewAuditViewProps {
   workspaceId: string;
@@ -27,13 +28,6 @@ const OPERATION_COLORS: Record<string, { bg: string; fg: string }> = {
   SendEmailToConsumer: { bg: '#fde8e8', fg: '#c50f1f' },
 };
 
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    year: 'numeric', month: 'short', day: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  });
-}
-
 const OperationBadge: React.FC<{ operation: string }> = ({ operation }) => {
   const { bg, fg } = OPERATION_COLORS[operation] ?? { bg: '#f0f0f0', fg: '#444' };
   return (
@@ -45,20 +39,6 @@ const OperationBadge: React.FC<{ operation: string }> = ({ operation }) => {
       {operation}
     </span>
   );
-};
-
-const DAY_OPTIONS = [7, 14, 30, 60, 90];
-
-const thStyle: React.CSSProperties = {
-  textAlign: 'left', padding: '6px 10px',
-  borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-  fontSize: 12, fontWeight: 600, color: tokens.colorNeutralForeground3,
-  whiteSpace: 'nowrap',
-};
-const tdStyle: React.CSSProperties = {
-  padding: '8px 10px', fontSize: 13,
-  borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-  verticalAlign: 'middle',
 };
 
 export const PurviewAuditView: React.FC<PurviewAuditViewProps> = ({ workspaceId, client }) => {

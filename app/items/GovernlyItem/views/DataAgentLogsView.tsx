@@ -9,32 +9,12 @@ import {
 } from '@fluentui/react-components';
 import { ArrowClockwise24Regular } from '@fluentui/react-icons';
 import { GovernlyApiClient, DataAgentLogEntry, DataAgentLogsReport } from '../../../clients/GovernlyApiClient';
+import { formatDateTime, DAY_OPTIONS, thStyle, tdStyle } from './auditShared';
 
 interface DataAgentLogsViewProps {
   workspaceId: string;
   client: GovernlyApiClient;
 }
-
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    year: 'numeric', month: 'short', day: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  });
-}
-
-const DAY_OPTIONS = [7, 14, 30, 60, 90];
-
-const thStyle: React.CSSProperties = {
-  textAlign: 'left', padding: '6px 10px',
-  borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-  fontSize: 12, fontWeight: 600, color: tokens.colorNeutralForeground3,
-  whiteSpace: 'nowrap',
-};
-const tdStyle: React.CSSProperties = {
-  padding: '8px 10px', fontSize: 13,
-  borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-  verticalAlign: 'middle',
-};
 
 export const DataAgentLogsView: React.FC<DataAgentLogsViewProps> = ({ workspaceId, client }) => {
   const [report, setReport]           = useState<DataAgentLogsReport | null>(null);
