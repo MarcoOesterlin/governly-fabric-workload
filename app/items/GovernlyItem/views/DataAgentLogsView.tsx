@@ -20,7 +20,7 @@ export const DataAgentLogsView: React.FC<DataAgentLogsViewProps> = ({ workspaceI
   const [report, setReport]           = useState<DataAgentLogsReport | null>(null);
   const [loading, setLoading]         = useState(true);
   const [error, setError]             = useState<string | null>(null);
-  const [days, setDays]               = useState(30);
+  const [days, setDays]               = useState(7);
   const [filterAgent, setFilterAgent] = useState('');
   const [hoveredRowId, setHoveredRowId] = useState<string | null>(null);
 
@@ -80,8 +80,8 @@ export const DataAgentLogsView: React.FC<DataAgentLogsViewProps> = ({ workspaceI
         <MessageBar intent="warning">
           <MessageBarBody>
             {report.error
-              ? `Data agent log query failed: ${report.error}. Ensure AuditLog.Read.All is consented.`
-              : 'Results may be incomplete — the audit query timed out or AuditLog.Read.All is not yet consented.'}
+              ? `Data agent log query failed: ${report.error}. Check that the Fabric CLI token has Fabric Admin permissions.`
+              : 'Results may be incomplete — some daily chunks failed (Fabric Admin API may require tenant admin permissions).'}
           </MessageBarBody>
         </MessageBar>
       )}
@@ -103,8 +103,8 @@ export const DataAgentLogsView: React.FC<DataAgentLogsViewProps> = ({ workspaceI
       {/* Empty */}
       {!loading && !error && report && report.entries.length === 0 && (
         <Text style={{ color: tokens.colorNeutralForeground3 }}>
-          No data agent activity found in audit logs for this workspace in the last {days} days.
-          {' '}This may mean AuditLog.Read.All is not yet consented, or the agent has not been used recently.
+          No data agent activity found for this workspace in the last {days} days.
+          {' '}This may mean the Fabric Admin Activity Events API returned no data agent events, or the agent has not been used recently.
         </Text>
       )}
 

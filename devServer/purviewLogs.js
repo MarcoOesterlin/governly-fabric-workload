@@ -204,7 +204,7 @@ async function queryFabricActivity(workspaceId, days = 30) {
  * @param {number} days
  * @returns {Promise<{ entries: object[]; queryDays: number; partial: boolean }>}
  */
-async function queryDataAgentActivity(workspaceId, days = 30) {
+async function queryDataAgentActivity(workspaceId, days = 7) {
   try {
     const token = acquireFabricToken();
 
