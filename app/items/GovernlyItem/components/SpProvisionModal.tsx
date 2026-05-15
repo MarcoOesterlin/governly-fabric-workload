@@ -5,7 +5,7 @@ import {
 } from '@fluentui/react-components';
 import {
   CheckmarkCircle24Filled, ErrorCircle24Filled,
-  ShieldCheckmark24Regular, Open24Regular,
+  ShieldCheckmark24Regular, Open24Regular, Info24Regular, ClipboardLink24Regular,
 } from '@fluentui/react-icons';
 import { GovernlyApiClient, SpStatus } from '../../../clients/GovernlyApiClient';
 import { WorkloadClientAPI } from '@ms-fabric/workload-client';
@@ -20,6 +20,16 @@ interface SpProvisionModalProps {
 }
 
 type Phase = 'idle' | 'running' | 'done' | 'error';
+type ConsentMode = 'url' | 'manual';
+
+const ALL_PERMISSIONS = [
+  { name: 'Application.ReadWrite.OwnedBy', type: 'Application', note: 'Bootstrap — required first' },
+  { name: 'Group.Read.All',                type: 'Application', note: 'Read AD groups and membership' },
+  { name: 'GroupMember.Read.All',          type: 'Application', note: 'Expand group members' },
+  { name: 'AuditLog.Read.All',             type: 'Application', note: 'Purview / audit logs' },
+  { name: 'Directory.Read.All',            type: 'Application', note: 'Resolve users and objects' },
+  { name: 'User.Read.All',                 type: 'Application', note: 'Read user profiles' },
+];
 
 export const SpProvisionModal: React.FC<SpProvisionModalProps> = ({
   open, apiClient, workloadClient, initialStatus, onClose, onStatusChange,
@@ -28,6 +38,8 @@ export const SpProvisionModal: React.FC<SpProvisionModalProps> = ({
   const [phase, setPhase] = useState<Phase>('idle');
   const [errorMsg, setErrorMsg] = useState<string | undefined>();
   const [consentOpened, setConsentOpened] = useState(false);
+  const [consentMode, setConsentMode] = useState<ConsentMode>('url');
+  const [copied, setCopied] = useState(false);
 
   React.useEffect(() => { setStatus(initialStatus); }, [initialStatus]);
 
@@ -36,6 +48,8 @@ export const SpProvisionModal: React.FC<SpProvisionModalProps> = ({
       setPhase('idle');
       setErrorMsg(undefined);
       setConsentOpened(false);
+      setConsentMode('url');
+      setCopied(false);
     }
   }, [open]);
 
@@ -80,29 +94,102 @@ export const SpProvisionModal: React.FC<SpProvisionModalProps> = ({
     await refreshStatus();
   }, [refreshStatus]);
 
+  const copyPermissions = useCallback(() => {
+    const text = ALL_PERMISSIONS.map(p => `${p.name} (${p.type})`).join('\n');
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, []);
+
   const renderBootstrap = () => (
     <>
       <MessageBar intent="warning">
         <MessageBarBody>
-          One-time setup required: a Global Admin must consent to <code>Application.ReadWrite.OwnedBy</code> before
-          Governly can manage its own secrets and permissions.
+          One-time setup required: a Global Admin must grant admin consent to the required
+          Microsoft Graph permissions before Governly can manage its service principal.
         </MessageBarBody>
       </MessageBar>
-      {consentOpened && (
-        <MessageBar intent="info" style={{ marginTop: 12 }}>
-          <MessageBarBody>
-            After approving consent in the browser tab, come back here and click <strong>Check Again</strong>.
-          </MessageBarBody>
-        </MessageBar>
-      )}
-      <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
-        <Button appearance={consentOpened ? 'secondary' : 'primary'} icon={<Open24Regular />} onClick={openConsent}>
-          {consentOpened ? 'Re-open Consent URL' : 'Open Admin Consent URL'}
-        </Button>
-        <Button appearance={consentOpened ? 'primary' : 'secondary'} onClick={handleCheckAgain}>
-          Check Again
-        </Button>
+
+      {/* Mode toggle */}
+      <div style={{ display: 'flex', gap: 0, marginTop: 16, borderRadius: 6, overflow: 'hidden', border: '1px solid #d1d1d1', width: 'fit-content' }}>
+        <button
+          onClick={() => setConsentMode('url')}
+          style={{
+            padding: '6px 16px', cursor: 'pointer', fontSize: 13, border: 'none',
+            background: consentMode === 'url' ? '#0078d4' : '#fff',
+            color: consentMode === 'url' ? '#fff' : '#323130',
+          }}>
+          <Open24Regular style={{ verticalAlign: 'middle', marginRight: 4, fontSize: 14 }} />
+          Admin Consent URL
+        </button>
+        <button
+          onClick={() => setConsentMode('manual')}
+          style={{
+            padding: '6px 16px', cursor: 'pointer', fontSize: 13, border: 'none', borderLeft: '1px solid #d1d1d1',
+            background: consentMode === 'manual' ? '#0078d4' : '#fff',
+            color: consentMode === 'manual' ? '#fff' : '#323130',
+          }}>
+          <Info24Regular style={{ verticalAlign: 'middle', marginRight: 4, fontSize: 14 }} />
+          Manual Instructions
+        </button>
       </div>
+
+      {consentMode === 'url' ? (
+        <>
+          <p style={{ fontSize: 13, margin: '12px 0 4px', color: '#605e5c' }}>
+            Click the button below to open the Microsoft admin consent page. Sign in as a
+            Global Admin and accept the requested permissions.
+          </p>
+          {consentOpened && (
+            <MessageBar intent="info" style={{ marginBottom: 12 }}>
+              <MessageBarBody>
+                After approving in the browser tab, come back here and click <strong>Check Again</strong>.
+              </MessageBarBody>
+            </MessageBar>
+          )}
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <Button appearance={consentOpened ? 'secondary' : 'primary'} icon={<Open24Regular />} onClick={openConsent}>
+              {consentOpened ? 'Re-open Consent URL' : 'Open Admin Consent URL'}
+            </Button>
+            <Button appearance={consentOpened ? 'primary' : 'secondary'} onClick={handleCheckAgain}>
+              Check Again
+            </Button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p style={{ fontSize: 13, margin: '12px 0 8px', color: '#605e5c' }}>
+            Ask your Global Admin to grant the following Application permissions in{' '}
+            <strong>Azure Portal → App registrations → [your app] → API permissions → Add permission → Microsoft Graph → Application permissions</strong>,
+            then click <strong>Grant admin consent</strong>.
+          </p>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: 'left', padding: '4px 8px', background: '#f3f2f1', borderBottom: '1px solid #d1d1d1' }}>Permission</th>
+                <th style={{ textAlign: 'left', padding: '4px 8px', background: '#f3f2f1', borderBottom: '1px solid #d1d1d1' }}>Type</th>
+                <th style={{ textAlign: 'left', padding: '4px 8px', background: '#f3f2f1', borderBottom: '1px solid #d1d1d1' }}>Purpose</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ALL_PERMISSIONS.map(p => (
+                <tr key={p.name}>
+                  <td style={{ padding: '5px 8px', borderBottom: '1px solid #edebe9', fontFamily: 'monospace', fontWeight: p.name === 'Application.ReadWrite.OwnedBy' ? 600 : 400 }}>{p.name}</td>
+                  <td style={{ padding: '5px 8px', borderBottom: '1px solid #edebe9', color: '#605e5c' }}>{p.type}</td>
+                  <td style={{ padding: '5px 8px', borderBottom: '1px solid #edebe9', color: '#605e5c' }}>{p.note}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <Button icon={<ClipboardLink24Regular />} onClick={copyPermissions}>
+              {copied ? 'Copied!' : 'Copy permission list'}
+            </Button>
+            <Button appearance="primary" onClick={handleCheckAgain}>Check Again</Button>
+          </div>
+        </>
+      )}
     </>
   );
 
