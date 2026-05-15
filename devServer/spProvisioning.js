@@ -245,18 +245,35 @@ async function ensureVault(vaultName) {
   const tenantId = getTenantId();
   const kvMgmt = new KeyVaultManagementClient(getCredential(), subscriptionId);
 
+  const location = process.env.AZURE_LOCATION || 'westeurope';
+  if (!process.env.AZURE_LOCATION) {
+    console.warn(`[SP] AZURE_LOCATION not set; defaulting to "westeurope". Set it in .env.dev to override.`);
+  }
+
   console.log(`[SP] Creating Key Vault "${vaultName}" in ${resourceGroup}...`);
-  await kvMgmt.vaults.beginCreateOrUpdateAndWait(resourceGroup, vaultName, {
-    location: process.env.AZURE_LOCATION || 'westeurope',
-    properties: {
-      tenantId,
-      sku: { family: 'A', name: 'standard' },
-      enableRbacAuthorization: true,
-      accessPolicies: [],
-    },
-  });
+  let vault;
+  try {
+    vault = await kvMgmt.vaults.beginCreateOrUpdateAndWait(resourceGroup, vaultName, {
+      location,
+      properties: {
+        tenantId,
+        sku: { family: 'A', name: 'standard' },
+        enableRbacAuthorization: true,
+        accessPolicies: [],
+      },
+    });
+  } catch (err) {
+    if (err.statusCode === 409 || err.code === 'ConflictError') {
+      throw new Error(
+        `Key Vault "${vaultName}" exists in soft-deleted state. ` +
+        `Run: az keyvault recover --name ${vaultName}  (to recover it)  OR  ` +
+        `az keyvault purge --name ${vaultName}  (to permanently delete it so it can be recreated).`
+      );
+    }
+    throw err;
+  }
   console.log(
-    `[SP] Vault "${vaultName}" created. ` +
+    `[SP] Vault "${vaultName}" created. URI: ${vault?.properties?.vaultUri}. ` +
     `NOTE: an RBAC role (Key Vault Secrets Officer) must be assigned to your ` +
     `signed-in identity / app SP before secrets can be written.`
   );
