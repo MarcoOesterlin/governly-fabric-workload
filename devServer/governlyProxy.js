@@ -50,6 +50,12 @@ async function readClientSecretFromKeyVault() {
   return _clientSecret;
 }
 
+function invalidateClientSecretCache() {
+  _clientSecret = null;
+  _graphToken = null;
+  console.log('[Proxy] Client secret + Graph token caches cleared.');
+}
+
 // ── Graph token via client credentials (app-only) ────────────────────────────
 // Uses the client secret stored in Key Vault to get a Graph app token directly.
 // No user token or OBO exchange needed — the app has InformationProtectionPolicy.Read.All.
@@ -316,3 +322,5 @@ module.exports = async function governlyProxyMiddleware(req, res, next) {
 
 /** Expose Fabric token acquisition for use by other route registrations. */
 module.exports.acquireFabricToken = () => acquireAzToken(AZ_TOKEN_RESOURCES.fabric);
+module.exports.acquireGraphTokenViaClientCredentials = acquireGraphTokenViaClientCredentials;
+module.exports.invalidateClientSecretCache = invalidateClientSecretCache;
