@@ -73,6 +73,7 @@ async function getWorkspaceRoles(workspaceId) {
 
 /**
  * Returns members of an AD group.
+ * Paginates through all results via @odata.nextLink.
  * @param {string} groupId
  * @returns {Promise<Array<{id,displayName,userPrincipalName,mail}>>}
  */
@@ -82,18 +83,24 @@ async function getGroupMembers(groupId) {
     '$select': 'id,displayName,userPrincipalName,mail',
     '$top': '999',
   });
-  const url = `${GRAPH_BASE}/groups/${encodeURIComponent(groupId)}/members?${params}`;
-  const result = await jsonRequest(url, { token });
-  if (!result.ok) {
-    console.warn(`[AccessMgmt] getGroupMembers(${groupId}) failed (${result.status}) — returning empty`);
-    return [];
+  let url = `${GRAPH_BASE}/groups/${encodeURIComponent(groupId)}/members?${params}`;
+  const rawMembers = [];
+  while (url) {
+    const result = await jsonRequest(url, { token });
+    if (!result.ok) {
+      console.warn(`[AccessMgmt] getGroupMembers(${groupId}) failed (${result.status}) — returning ${rawMembers.length} collected so far`);
+      return rawMembers.length ? rawMembers : [];
+    }
+    rawMembers.push(...(result.data.value ?? []));
+    url = result.data['@odata.nextLink'] ?? null;
   }
-  return result.data.value ?? [];
+  return rawMembers;
 }
 
 /**
  * Fetches "Add member to group" audit events for the given group.
  * Returns a Map from memberId → ISO 8601 addedAt string (most recent entry wins).
+ * Paginates through all results via @odata.nextLink.
  *
  * Graph auditLogs/directoryAudits:
  *   Each entry has targetResources: one Group entry (the group itself) and
@@ -111,28 +118,32 @@ async function getGroupAuditDates(groupId) {
     '$filter': filter,
     '$select': 'activityDateTime,targetResources',
     '$top': '200',
+    '$orderby': 'activityDateTime desc',
   });
-  const url = `${GRAPH_BASE}/auditLogs/directoryAudits?${params}`;
-  const result = await jsonRequest(url, { token });
-
-  if (!result.ok) {
-    // AuditLog.Read.All may not yet be consented — degrade gracefully
-    console.warn(`[AccessMgmt] Audit log fetch failed (${result.status}) — addedAt will be null for all members`);
-    return new Map();
-  }
+  let url = `${GRAPH_BASE}/auditLogs/directoryAudits?${params}`;
 
   /** @type {Map<string, string>} */
   const map = new Map();
-  for (const entry of result.data.value ?? []) {
-    const addedAt = entry.activityDateTime;
-    for (const target of entry.targetResources ?? []) {
-      if (target.type !== 'Group' && target.id) {
-        // Only update if not already present (results are newest-first from Graph)
-        if (!map.has(target.id)) {
-          map.set(target.id, addedAt);
+  while (url) {
+    const result = await jsonRequest(url, { token });
+    if (!result.ok) {
+      // AuditLog.Read.All may not yet be consented — degrade gracefully
+      console.warn(`[AccessMgmt] Audit log fetch failed (${result.status}) — addedAt will be null for remaining members`);
+      return map;
+    }
+
+    for (const entry of result.data.value ?? []) {
+      const addedAt = entry.activityDateTime;
+      for (const target of entry.targetResources ?? []) {
+        if (target.type !== 'Group' && target.id) {
+          // Only update if not already present (results are newest-first from Graph)
+          if (!map.has(target.id)) {
+            map.set(target.id, addedAt);
+          }
         }
       }
     }
+    url = result.data['@odata.nextLink'] ?? null;
   }
   return map;
 }
