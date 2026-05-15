@@ -102,6 +102,16 @@ function registerDevServerApis(app) {
     }
   });
 
+  app.post('/api/sp-setup', async (_req, res) => {
+    try {
+      const status = await spProvisioning.provisionSp();
+      res.json(status);
+    } catch (err) {
+      console.error('[SpSetup] Error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   console.log('*** Mounting Governly DQ Routes ***');
   registerDqRoutes(app);
 
