@@ -10,6 +10,7 @@ const spProvisioning = require('./spProvisioning');
 const { provisionDataAgent, httpRequest } = require('./dataAgentProvisioner');
 const { suggestLabels } = require('./labelSuggester');
 const { registerDqRoutes } = require('./dqRoutes');
+const accessManagement = require('./accessManagement');
 
 /**
  * Register dev server manifest APIs with an Express application
@@ -108,6 +109,30 @@ function registerDevServerApis(app) {
       res.json(status);
     } catch (err) {
       console.error('[SpSetup] Error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/access/roles', async (req, res) => {
+    const { workspaceId } = req.query;
+    if (!workspaceId) return res.status(400).json({ error: 'Query param "workspaceId" is required.' });
+    try {
+      const report = await accessManagement.buildAccessReport(workspaceId);
+      res.json(report);
+    } catch (err) {
+      console.error('[AccessRoles] Error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/access/group-member', async (req, res) => {
+    const { groupId, memberId } = req.query;
+    if (!groupId || !memberId) return res.status(400).json({ error: 'Query params "groupId" and "memberId" are required.' });
+    try {
+      await accessManagement.removeMemberFromGroup(groupId, memberId);
+      res.status(204).end();
+    } catch (err) {
+      console.error('[AccessRevoke] Error:', err.message);
       res.status(500).json({ error: err.message });
     }
   });
