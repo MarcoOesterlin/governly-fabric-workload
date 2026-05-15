@@ -75,13 +75,23 @@ export const DataAgentLogsView: React.FC<DataAgentLogsViewProps> = ({ workspaceI
         </div>
       </div>
 
-      {/* Partial / consent warning */}
-      {report?.partial && (
+      {/* Admin permissions required — distinct state */}
+      {report?.partial && report.error?.includes('admin permissions required') && (
+        <MessageBar intent="error">
+          <MessageBarBody>
+            <strong>Fabric tenant admin permissions required.</strong>
+            {' '}The Activity Events API is an admin-only endpoint. The CLI account must be a Fabric tenant admin to query data agent logs.
+          </MessageBarBody>
+        </MessageBar>
+      )}
+
+      {/* Partial / warning (non-admin failures) */}
+      {report?.partial && !report.error?.includes('admin permissions required') && (
         <MessageBar intent="warning">
           <MessageBarBody>
             {report.error
-              ? `Data agent log query failed: ${report.error}. Check that the Fabric CLI token has Fabric Admin permissions.`
-              : 'Results may be incomplete — some daily chunks failed (Fabric Admin API may require tenant admin permissions).'}
+              ? `Data agent log query failed: ${report.error}.`
+              : 'Results may be incomplete — some daily chunks failed.'}
           </MessageBarBody>
         </MessageBar>
       )}

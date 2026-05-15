@@ -228,16 +228,23 @@ async function queryDataAgentActivity(workspaceId, days = 7) {
       const endStr   = chunkEnd.toISOString();
 
       let url = `${FABRIC_BASE}/admin/activityEvents?startDateTime='${startStr}'&endDateTime='${endStr}'`;
+      let chunkOk = true;
       while (url) {
         const result = await jsonRequest(url, { token });
         if (!result.ok) {
           console.warn(`[DataAgentLogs] activityEvents ${startStr} failed (${result.status}):`, JSON.stringify(result.data).slice(0, 200));
           partial = true;
+          chunkOk = false;
+          // 403 = admin permissions missing — no point querying further days
+          if (result.status === 403) {
+            return { entries: [], queryDays: days, partial: true, error: 'Fabric tenant admin permissions required for the Activity Events API' };
+          }
           break;
         }
         allEvents.push(...(result.data.activityEventEntities ?? []));
         url = result.data.continuationUri ?? null;
       }
+      if (!chunkOk) break;
       cursor = chunkEnd;
     }
 
