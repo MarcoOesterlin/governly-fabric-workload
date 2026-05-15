@@ -50,6 +50,9 @@ async function jsonRequest(url, { method = 'GET', token, body } = {}) {
       });
       res.on('error', reject);
     });
+    req.setTimeout(30_000, () => {
+      req.destroy(new Error(`Request timed out after 30s: ${reqOpts.hostname}${reqOpts.path}`));
+    });
     req.on('error', reject);
     if (bodyStr) req.write(bodyStr);
     req.end();
