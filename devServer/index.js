@@ -6,6 +6,7 @@
 const manifestApi = require('./manifestApi');
 const workloadApi = require('./workloadApi');
 const governlyProxy = require('./governlyProxy');
+const spProvisioning = require('./spProvisioning');
 const { provisionDataAgent, httpRequest } = require('./dataAgentProvisioner');
 const { suggestLabels } = require('./labelSuggester');
 const { registerDqRoutes } = require('./dqRoutes');
@@ -78,6 +79,16 @@ function registerDevServerApis(app) {
       res.json(result);
     } catch (err) {
       console.error('[SuggestLabels] Error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/sp-status', async (_req, res) => {
+    try {
+      const status = await spProvisioning.getSpStatus();
+      res.json(status);
+    } catch (err) {
+      console.error('[SpStatus] Error:', err.message);
       res.status(500).json({ error: err.message });
     }
   });
