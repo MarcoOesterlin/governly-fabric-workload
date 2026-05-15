@@ -8,10 +8,12 @@ import {
   ShieldCheckmark24Regular, Open24Regular,
 } from '@fluentui/react-icons';
 import { GovernlyApiClient, SpStatus } from '../../../clients/GovernlyApiClient';
+import { WorkloadClientAPI } from '@ms-fabric/workload-client';
 
 interface SpProvisionModalProps {
   open: boolean;
   apiClient: GovernlyApiClient;
+  workloadClient: WorkloadClientAPI;
   initialStatus: SpStatus | null;
   onClose: () => void;
   onStatusChange: (status: SpStatus) => void;
@@ -20,7 +22,7 @@ interface SpProvisionModalProps {
 type Phase = 'idle' | 'running' | 'done' | 'error';
 
 export const SpProvisionModal: React.FC<SpProvisionModalProps> = ({
-  open, apiClient, initialStatus, onClose, onStatusChange,
+  open, apiClient, workloadClient, initialStatus, onClose, onStatusChange,
 }) => {
   const [status, setStatus] = useState<SpStatus | null>(initialStatus);
   const [phase, setPhase] = useState<Phase>('idle');
@@ -64,11 +66,11 @@ export const SpProvisionModal: React.FC<SpProvisionModalProps> = ({
   const openConsent = useCallback(async () => {
     try {
       const urls = await apiClient.getSpConsentUrl();
-      window.open(urls.url, '_blank', 'noopener,noreferrer');
+      await workloadClient.navigation.openBrowserTab({ url: urls.url });
     } catch (e: unknown) {
       setErrorMsg(e instanceof Error ? e.message : String(e));
     }
-  }, [apiClient]);
+  }, [apiClient, workloadClient]);
 
   const renderBootstrap = () => (
     <>

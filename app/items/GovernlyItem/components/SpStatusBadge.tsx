@@ -2,10 +2,12 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Spinner } from '@fluentui/react-components';
 import { ShieldCheckmark24Regular } from '@fluentui/react-icons';
 import { GovernlyApiClient, SpStatus } from '../../../clients/GovernlyApiClient';
+import { WorkloadClientAPI } from '@ms-fabric/workload-client';
 import { SpProvisionModal } from './SpProvisionModal';
 
 interface SpStatusBadgeProps {
   apiClient: GovernlyApiClient;
+  workloadClient: WorkloadClientAPI;
 }
 
 type Color = 'green' | 'amber' | 'red' | 'gray';
@@ -26,7 +28,7 @@ const COLOR_HEX: Record<Color, string> = {
   gray: '#605e5c',
 };
 
-export const SpStatusBadge: React.FC<SpStatusBadgeProps> = ({ apiClient }) => {
+export const SpStatusBadge: React.FC<SpStatusBadgeProps> = ({ apiClient, workloadClient }) => {
   const [status, setStatus] = useState<SpStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
@@ -93,6 +95,7 @@ export const SpStatusBadge: React.FC<SpStatusBadgeProps> = ({ apiClient }) => {
       <SpProvisionModal
         open={open}
         apiClient={apiClient}
+        workloadClient={workloadClient}
         initialStatus={status}
         onClose={() => setOpen(false)}
         onStatusChange={handleStatusChange}

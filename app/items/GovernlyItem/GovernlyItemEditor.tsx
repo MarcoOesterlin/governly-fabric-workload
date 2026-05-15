@@ -314,7 +314,7 @@ const GovernlyItemEditor: React.FC<GovernlyItemEditorProps> = ({ workloadClient 
           </button>
         )}
 
-        <SpStatusBadge apiClient={apiClient} />
+        <SpStatusBadge apiClient={apiClient} workloadClient={workloadClient} />
 
         {workspaceId && (
           <button
