@@ -50,6 +50,11 @@ async function readClientSecretFromKeyVault() {
   return _clientSecret;
 }
 
+/**
+ * Resets the in-memory client-secret and Graph-token caches.
+ * Call this after writing a new client secret to Key Vault so the next
+ * Graph call re-reads the secret and re-acquires a fresh token.
+ */
 function invalidateClientSecretCache() {
   _clientSecret = null;
   _graphToken = null;
