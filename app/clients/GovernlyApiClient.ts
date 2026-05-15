@@ -1,4 +1,5 @@
 import { WorkloadClientAPI } from '@ms-fabric/workload-client';
+import type { WorkspaceRole } from './FabricPlatformTypes';
 import type { TableColumn, DqRunConfig, DqRunMeta, DqRunSummary, DqFailedRow, DqPreloadResult } from '../items/GovernlyItem/views/dataQuality/dqTypes';
 
 // Fabric constructs are batch-limited to 2,000 items per request.
@@ -107,7 +108,7 @@ export interface SpConsentUrls {
 export interface GroupMember {
   id: string;
   displayName: string;
-  email: string;
+  email?: string;
   addedAt: string | null;   // ISO-8601 or null if audit log unavailable
   groupId: string;
 }
@@ -119,15 +120,15 @@ export interface AccessPrincipal {
   email?: string;
 }
 
-export interface WorkspaceRoleAssignment {
+export interface AccessRoleAssignment {
   id: string;
-  role: string;
+  role: WorkspaceRole;
   principal: AccessPrincipal;
   members?: GroupMember[];   // only present when principal.type === 'Group'
 }
 
 export interface WorkspaceAccessReport {
-  assignments: WorkspaceRoleAssignment[];
+  assignments: AccessRoleAssignment[];
 }
 
 /**
