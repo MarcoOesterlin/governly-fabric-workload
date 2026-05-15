@@ -89,6 +89,7 @@ export interface LabelSuggestionsResult {
 export interface SpPermissionStatus {
   name: string;
   granted: boolean;
+  cliCovered?: boolean;
 }
 
 export interface SpStatus {
@@ -103,6 +104,38 @@ export interface SpStatus {
 export interface SpConsentUrls {
   url: string;
   bootstrapUrl: string;
+}
+
+export interface OversharingFlags {
+  hasDirectGrants: boolean;
+  hasExternalUsers: boolean;
+  unlabeledWithGrants: boolean;
+  highAccessCount: boolean;
+}
+
+export interface ItemUser {
+  identifier: string;
+  displayName: string;
+  principalType: string;
+  accessRights: string[];
+  isExternal: boolean;
+  grantedBy: string | null;
+  grantedAt: string | null;
+}
+
+export interface OversharingItem {
+  id: string;
+  displayName: string;
+  type: string;
+  labelId: string | null;
+  labelName: string | null;
+  users: ItemUser[];
+  flags: OversharingFlags;
+}
+
+export interface OversharingReport {
+  items: OversharingItem[];
+  generatedAt: string;
 }
 
 export interface GroupMember {
@@ -541,6 +574,19 @@ export class GovernlyApiClient {
     const resp = await fetch(`/api/access/group-member?${qs}`, { method: 'DELETE' });
     if (!resp.ok) throw new Error(`revokeGroupMember failed (${resp.status}): ${await resp.text()}`);
   }
+
+  async getOversharingReport(workspaceId: string): Promise<OversharingReport> {
+    const resp = await fetch(`/api/oversharing/report?workspaceId=${encodeURIComponent(workspaceId)}`);
+    if (!resp.ok) throw new Error(`getOversharingReport failed (${resp.status}): ${await resp.text()}`);
+    return resp.json() as Promise<OversharingReport>;
+  }
+
+  async revokeItemUser(workspaceId: string, itemId: string, userIdentifier: string): Promise<void> {
+    const params = new URLSearchParams({ workspaceId, itemId, userIdentifier });
+    const resp = await fetch(`/api/oversharing/item-user?${params}`, { method: 'DELETE' });
+    if (!resp.ok) throw new Error(`revokeItemUser failed (${resp.status}): ${await resp.text()}`);
+  }
+
 
   // ── Audit Logs ───────────────────────────────────────────────────────────────
 
