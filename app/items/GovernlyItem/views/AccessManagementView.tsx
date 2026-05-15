@@ -107,7 +107,7 @@ const MembersTable: React.FC<MembersTableProps> = ({ members, revoking, onRevoke
   }}>
     <thead>
       <tr style={{ backgroundColor: '#f5f5f5' }}>
-        {['Name', 'Email', 'Added', 'Status', ''].map(h => (
+        {['Name', 'Email', 'Added', 'Status', 'Action'].map(h => (
           <th key={h} style={{
             textAlign: 'left',
             padding: '6px 10px',
@@ -140,7 +140,7 @@ const MembersTable: React.FC<MembersTableProps> = ({ members, revoking, onRevoke
                 alignItems: 'center',
                 gap: 4,
               }}>
-                {stale && <Warning16Regular style={{ flexShrink: 0 }} />}
+                {stale && <Warning16Regular aria-hidden="true" style={{ flexShrink: 0 }} />}
                 {formatDate(member.addedAt)}
               </span>
             </td>
@@ -215,6 +215,10 @@ const AssignmentCard: React.FC<AssignmentCardProps> = ({
             size="small"
             icon={expanded ? <ChevronDown20Regular /> : <ChevronRight20Regular />}
             onClick={() => onToggle(assignment.id)}
+            aria-label={expanded
+              ? `Collapse ${principal.displayName}`
+              : `Expand ${principal.displayName}, ${members!.length} member${members!.length === 1 ? '' : 's'}`
+            }
           >
             {expanded ? 'Collapse' : `${members!.length} member${members!.length !== 1 ? 's' : ''}`}
           </Button>
@@ -286,8 +290,9 @@ export const AccessManagementView: React.FC<AccessManagementViewProps> = ({ work
       setReport(prev => {
         if (!prev) return prev;
         return {
+          ...prev,
           assignments: prev.assignments.map(a => {
-            if (!a.members) return a;
+            if (!a.members || a.principal.id !== groupId) return a;
             return { ...a, members: a.members.filter(m => m.id !== memberId) };
           }),
         };
