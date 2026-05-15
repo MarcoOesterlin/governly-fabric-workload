@@ -98,6 +98,14 @@ function httpJson(url, { method = 'GET', token, body, timeoutMs = 30_000 } = {})
 let _setupInFlight = null;
 
 let _appObjectIdCache = null;
+let _ourSpObjectIdCache = null;
+let _graphSpObjectIdCache = null;
+let _credential = null;
+
+function getCredential() {
+  if (!_credential) _credential = new DefaultAzureCredential();
+  return _credential;
+}
 
 async function resolveAppObjectId(graphToken) {
   if (_appObjectIdCache) return _appObjectIdCache;
@@ -111,8 +119,6 @@ async function resolveAppObjectId(graphToken) {
   return id;
 }
 
-let _graphSpObjectIdCache = null;
-
 async function resolveGraphServicePrincipalId(graphToken) {
   if (_graphSpObjectIdCache) return _graphSpObjectIdCache;
   const url = `https://graph.microsoft.com/v1.0/servicePrincipals?$filter=appId eq '${GRAPH_APP_ID}'&$select=id`;
@@ -125,19 +131,21 @@ async function resolveGraphServicePrincipalId(graphToken) {
 }
 
 async function resolveOurServicePrincipalId(graphToken) {
+  if (_ourSpObjectIdCache) return _ourSpObjectIdCache;
   const clientId = getClientId();
   const url = `https://graph.microsoft.com/v1.0/servicePrincipals?$filter=appId eq '${clientId}'&$select=id`;
   const resp = await httpJson(url, { token: graphToken });
   if (!resp.ok) throw new Error(`Failed to resolve our SP: ${resp.status} ${resp.raw.slice(0, 300)}`);
-  return resp.body?.value?.[0]?.id || null;
+  const id = resp.body?.value?.[0]?.id || null;
+  if (id) _ourSpObjectIdCache = id;
+  return id;
 }
 
 // ── Status check ────────────────────────────────────────────────────────────
 
 async function readVaultSecret(vaultName) {
   try {
-    const credential = new DefaultAzureCredential();
-    const client = new SecretClient(`https://${vaultName}.vault.azure.net`, credential);
+    const client = new SecretClient(`https://${vaultName}.vault.azure.net`, getCredential());
     const secret = await client.getSecret(SECRET_NAME);
     return {
       vaultExists: true,
@@ -145,7 +153,7 @@ async function readVaultSecret(vaultName) {
       keyId: secret.properties.tags?.keyId || null,
     };
   } catch (err) {
-    if (err.code === 'VaultNotFound' || /not found/i.test(err.message || '')) {
+    if (err.code === 'VaultNotFound' || /vault.*not found/i.test(err.message || '')) {
       return { vaultExists: false, expiresOn: null, keyId: null };
     }
     if (err.code === 'SecretNotFound' || err.statusCode === 404) {
@@ -163,6 +171,7 @@ async function listGrantedGraphRoleIds(graphToken) {
   const ourSpId = await resolveOurServicePrincipalId(graphToken);
   if (!ourSpId) return new Set();
   const graphSpId = await resolveGraphServicePrincipalId(graphToken);
+  // $top=999: fetch all in one page; an SP will never have more than a handful of role assignments
   const url = `https://graph.microsoft.com/v1.0/servicePrincipals/${ourSpId}/appRoleAssignments?$top=999`;
   const resp = await httpJson(url, { token: graphToken });
   if (!resp.ok) throw new Error(`Failed to list app role assignments: ${resp.status} ${resp.raw.slice(0, 300)}`);
@@ -179,7 +188,10 @@ async function getSpStatus() {
 
   const [vaultInfo, grantedRoleIds] = await Promise.all([
     readVaultSecret(vaultName),
-    listGrantedGraphRoleIds(graphToken).catch(() => new Set()),
+    listGrantedGraphRoleIds(graphToken).catch((err) => {
+      console.error('[SpStatus] Failed to list granted Graph roles; returning empty set:', err.message);
+      return new Set();
+    }),
   ]);
 
   const bootstrapGranted = grantedRoleIds.has(BOOTSTRAP_PERMISSION.id);
