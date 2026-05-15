@@ -131,6 +131,38 @@ export interface WorkspaceAccessReport {
   assignments: AccessRoleAssignment[];
 }
 
+export interface AuditRecord {
+  id: string;
+  createdDateTime: string;   // ISO-8601
+  userId: string;            // user email/UPN
+  operation: string;
+  service: string;
+  objectId: string;
+  workspaceId: string;
+  itemName: string;
+  itemType: string;
+  itemId: string;
+}
+
+export interface FabricAuditReport {
+  records: AuditRecord[];
+  queryDays: number;
+  partial: boolean;          // true if AuditLog.Read.All not consented or timed out
+  error?: string;
+}
+
+export interface DataAgentLogEntry extends AuditRecord {
+  agentId: string;
+  agentName: string;
+}
+
+export interface DataAgentLogsReport {
+  entries: DataAgentLogEntry[];
+  queryDays: number;
+  partial: boolean;
+  error?: string;
+}
+
 /**
  * GovernlyApiClient
  *
@@ -499,6 +531,22 @@ export class GovernlyApiClient {
     const qs = new URLSearchParams({ groupId, memberId });
     const resp = await fetch(`/api/access/group-member?${qs}`, { method: 'DELETE' });
     if (!resp.ok) throw new Error(`revokeGroupMember failed (${resp.status}): ${await resp.text()}`);
+  }
+
+  // ── Audit Logs ───────────────────────────────────────────────────────────────
+
+  async getFabricAuditLogs(workspaceId: string, days = 30): Promise<FabricAuditReport> {
+    const qs = new URLSearchParams({ workspaceId, days: String(days) });
+    const resp = await fetch(`/api/audit/fabric-activity?${qs}`);
+    if (!resp.ok) throw new Error(`getFabricAuditLogs failed (${resp.status}): ${await resp.text()}`);
+    return resp.json() as Promise<FabricAuditReport>;
+  }
+
+  async getDataAgentLogs(workspaceId: string, days = 30): Promise<DataAgentLogsReport> {
+    const qs = new URLSearchParams({ workspaceId, days: String(days) });
+    const resp = await fetch(`/api/audit/data-agent-logs?${qs}`);
+    if (!resp.ok) throw new Error(`getDataAgentLogs failed (${resp.status}): ${await resp.text()}`);
+    return resp.json() as Promise<DataAgentLogsReport>;
   }
 
   // ── Data Quality ─────────────────────────────────────────────────────────────
