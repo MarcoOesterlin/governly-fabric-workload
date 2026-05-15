@@ -93,6 +93,14 @@ function registerDevServerApis(app) {
     }
   });
 
+  app.get('/api/sp-consent-url', (_req, res) => {
+    try {
+      res.json(spProvisioning.getConsentUrl());
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   console.log('*** Mounting Governly DQ Routes ***');
   registerDqRoutes(app);
 
