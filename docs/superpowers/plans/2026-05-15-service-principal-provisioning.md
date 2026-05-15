@@ -66,7 +66,7 @@ These IDs are documented Microsoft Graph application permission IDs (stable per 
 - [ ] **Step 1: Install ARM packages**
 
 ```bash
-npm install --save-dev @azure/arm-keyvault@^4.2.1 @azure/arm-resources@^5.2.0
+npm install --save-dev @azure/arm-keyvault@^5.0.0 @azure/arm-resources@^7.0.0
 ```
 
 - [ ] **Step 2: Verify installation**

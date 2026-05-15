@@ -35,6 +35,8 @@
     "uuid": "^11.0.5"
   },
   "devDependencies": {
+    "@azure/arm-keyvault": "^5.0.0",
+    "@azure/arm-resources": "^7.0.0",
     "@azure/identity": "^4.13.1",
     "@azure/keyvault-secrets": "^4.11.1",
     "@azure/msal-node": "^5.1.3",
