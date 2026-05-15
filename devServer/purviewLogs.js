@@ -215,7 +215,7 @@ async function queryDataAgentActivity(workspaceId, days = 30) {
       listDataAgents(workspaceId),
     ]);
 
-    const agentIds  = new Set(agents.map(a => (a.id ?? '').toLowerCase()));
+    const agentIds  = new Set(agents.filter(a => a.id).map(a => a.id.toLowerCase()));
     const agentById = Object.fromEntries(
       agents.filter(a => a.id).map(a => [a.id.toLowerCase(), a.displayName])
     );
