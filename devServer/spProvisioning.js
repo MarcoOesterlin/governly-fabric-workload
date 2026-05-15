@@ -145,11 +145,11 @@ async function readVaultSecret(vaultName) {
       keyId: secret.properties.tags?.keyId || null,
     };
   } catch (err) {
+    if (err.code === 'VaultNotFound' || /not found/i.test(err.message || '')) {
+      return { vaultExists: false, expiresOn: null, keyId: null };
+    }
     if (err.code === 'SecretNotFound' || err.statusCode === 404) {
       return { vaultExists: true, expiresOn: null, keyId: null };
-    }
-    if (err.code === 'VaultNotFound' || err.statusCode === 404 || /not found/i.test(err.message || '')) {
-      return { vaultExists: false, expiresOn: null, keyId: null };
     }
     throw err;
   }
