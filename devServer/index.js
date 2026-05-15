@@ -141,8 +141,12 @@ function registerDevServerApis(app) {
   app.get('/api/audit/fabric-activity', async (req, res) => {
     const { workspaceId, days } = req.query;
     if (!workspaceId) return res.status(400).json({ error: 'Query param "workspaceId" is required.' });
+    const lookbackDays = days !== undefined ? Number(days) : 30;
+    if (isNaN(lookbackDays) || lookbackDays < 1 || lookbackDays > 365) {
+      return res.status(400).json({ error: 'Query param "days" must be an integer between 1 and 365.' });
+    }
     try {
-      const report = await purviewLogs.queryFabricActivity(workspaceId, days ? Number(days) : 30);
+      const report = await purviewLogs.queryFabricActivity(workspaceId, lookbackDays);
       res.json(report);
     } catch (err) {
       console.error('[FabricAudit] Error:', err.message);
@@ -153,8 +157,12 @@ function registerDevServerApis(app) {
   app.get('/api/audit/data-agent-logs', async (req, res) => {
     const { workspaceId, days } = req.query;
     if (!workspaceId) return res.status(400).json({ error: 'Query param "workspaceId" is required.' });
+    const lookbackDays = days !== undefined ? Number(days) : 30;
+    if (isNaN(lookbackDays) || lookbackDays < 1 || lookbackDays > 365) {
+      return res.status(400).json({ error: 'Query param "days" must be an integer between 1 and 365.' });
+    }
     try {
-      const report = await purviewLogs.queryDataAgentActivity(workspaceId, days ? Number(days) : 30);
+      const report = await purviewLogs.queryDataAgentActivity(workspaceId, lookbackDays);
       res.json(report);
     } catch (err) {
       console.error('[DataAgentLogs] Error:', err.message);
