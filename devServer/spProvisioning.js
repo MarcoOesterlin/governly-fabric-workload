@@ -280,6 +280,140 @@ async function ensureVault(vaultName) {
   return { vaultName, created: true };
 }
 
+// ── Setup flow ─────────────────────────────────────────────────────────────
+
+async function _provisionSpInner() {
+  const graphToken = await acquireGraphTokenViaClientCredentials();
+  const vaultName = getVaultName();
+
+  // Step 0: Bootstrap check
+  const grantedRoleIds = await listGrantedGraphRoleIds(graphToken);
+  if (!grantedRoleIds.has(BOOTSTRAP_PERMISSION.id)) {
+    throw new Error(
+      `Bootstrap permission "${BOOTSTRAP_PERMISSION.name}" is not consented. ` +
+      `A Global Admin must visit /api/sp-consent-url and grant consent before ` +
+      `setup can run.`
+    );
+  }
+
+  // Step 1: Ensure vault
+  await ensureVault(vaultName);
+
+  // Step 2: Read existing state to know what to clean up
+  const priorVaultInfo = await readVaultSecret(vaultName);
+  const priorKeyId = priorVaultInfo.keyId;
+
+  // Step 3: Generate new secret via Graph
+  const appObjectId = await resolveAppObjectId(graphToken);
+  const endDateTime = new Date(Date.now() + SECRET_LIFETIME_DAYS * 24 * 3600 * 1000).toISOString();
+
+  const addPwResp = await httpJson(
+    `https://graph.microsoft.com/v1.0/applications/${appObjectId}/addPassword`,
+    {
+      method: 'POST',
+      token: graphToken,
+      body: {
+        passwordCredential: {
+          displayName: 'Governly Auto-Rotated',
+          endDateTime,
+        },
+      },
+    }
+  );
+  if (!addPwResp.ok) {
+    throw new Error(`addPassword failed: ${addPwResp.status} ${addPwResp.raw.slice(0, 400)}`);
+  }
+  const newSecretText = addPwResp.body.secretText;
+  const newKeyId = addPwResp.body.keyId;
+  if (!newSecretText || !newKeyId) {
+    throw new Error('addPassword returned no secretText / keyId.');
+  }
+
+  // Step 4: Write to Key Vault. On failure, roll back the new credential.
+  try {
+    const client = new SecretClient(`https://${vaultName}.vault.azure.net`, getCredential());
+    await client.setSecret(SECRET_NAME, newSecretText, {
+      expiresOn: new Date(endDateTime),
+      tags: { keyId: newKeyId },
+    });
+    invalidateClientSecretCache();
+  } catch (kvErr) {
+    console.error('[SP] Key Vault write failed, rolling back new credential:', kvErr.message);
+    try {
+      await httpJson(
+        `https://graph.microsoft.com/v1.0/applications/${appObjectId}/removePassword`,
+        { method: 'POST', token: graphToken, body: { keyId: newKeyId } }
+      );
+    } catch (rollbackErr) {
+      console.error('[SP] Rollback also failed:', rollbackErr.message);
+    }
+    throw new Error(`Key Vault write failed: ${kvErr.message}`);
+  }
+
+  // Step 5: Remove prior credential (best-effort; never fail the rotation for this).
+  if (priorKeyId && priorKeyId !== newKeyId) {
+    try {
+      await httpJson(
+        `https://graph.microsoft.com/v1.0/applications/${appObjectId}/removePassword`,
+        { method: 'POST', token: graphToken, body: { keyId: priorKeyId } }
+      );
+    } catch (e) {
+      console.warn(`[SP] Failed to remove old credential ${priorKeyId}: ${e.message}`);
+    }
+  }
+
+  // Step 6: Merge required Graph permissions into requiredResourceAccess
+  const appResp = await httpJson(
+    `https://graph.microsoft.com/v1.0/applications/${appObjectId}?$select=requiredResourceAccess`,
+    { token: graphToken }
+  );
+  if (!appResp.ok) throw new Error(`Get application failed: ${appResp.status} ${appResp.raw.slice(0, 300)}`);
+
+  const existingRRA = appResp.body.requiredResourceAccess || [];
+  const merged = mergeGraphPermissions(existingRRA);
+
+  const patchResp = await httpJson(
+    `https://graph.microsoft.com/v1.0/applications/${appObjectId}`,
+    {
+      method: 'PATCH',
+      token: graphToken,
+      body: { requiredResourceAccess: merged },
+    }
+  );
+  if (!patchResp.ok) {
+    throw new Error(`PATCH application failed: ${patchResp.status} ${patchResp.raw.slice(0, 400)}`);
+  }
+
+  // Step 7: Re-check status and return
+  return getSpStatus();
+}
+
+function mergeGraphPermissions(existingRRA) {
+  const out = existingRRA.map(r => ({
+    resourceAppId: r.resourceAppId,
+    resourceAccess: [...(r.resourceAccess || [])],
+  }));
+  let graphEntry = out.find(r => r.resourceAppId === GRAPH_APP_ID);
+  if (!graphEntry) {
+    graphEntry = { resourceAppId: GRAPH_APP_ID, resourceAccess: [] };
+    out.push(graphEntry);
+  }
+  const seen = new Set(graphEntry.resourceAccess.map(a => a.id));
+  for (const p of REQUIRED_GRAPH_PERMISSIONS) {
+    if (!seen.has(p.id)) {
+      graphEntry.resourceAccess.push({ id: p.id, type: 'Role' });
+      seen.add(p.id);
+    }
+  }
+  return out;
+}
+
+async function provisionSp() {
+  if (_setupInFlight) return _setupInFlight;
+  _setupInFlight = _provisionSpInner().finally(() => { _setupInFlight = null; });
+  return _setupInFlight;
+}
+
 module.exports = {
   REQUIRED_GRAPH_PERMISSIONS,
   BOOTSTRAP_PERMISSION,
@@ -299,4 +433,6 @@ module.exports = {
   getSpStatus,
   getConsentUrl,
   ensureVault,
+  mergeGraphPermissions,
+  provisionSp,
 };
