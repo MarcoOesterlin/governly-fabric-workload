@@ -197,63 +197,80 @@ async function queryFabricActivity(workspaceId, days = 30) {
 }
 
 /**
- * Query Purview audit logs for data agent usage events in a workspace.
- * Also uses listDataAgents() to filter records whose objectId matches a known agent ID.
+ * Query Fabric Admin Activity Events for data agent usage events in a workspace.
+ * Uses the Fabric REST API (/admin/activityEvents) — no Graph audit log required.
+ * Fabric limits each request to a 24-hour window; we loop over the requested days.
  * @param {string} workspaceId
  * @param {number} days
  * @returns {Promise<{ entries: object[]; queryDays: number; partial: boolean }>}
  */
 async function queryDataAgentActivity(workspaceId, days = 30) {
   try {
-    const token     = await acquireGraphTokenViaClientCredentials();
-    const endDate   = new Date().toISOString();
-    const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const token = acquireFabricToken();
 
-    // Fetch agent list in parallel with query creation (both are independent)
-    const [queryId, agents] = await Promise.all([
-      createAuditQuery(token, {
-        displayName      : `Governly-DataAgentLogs-${Date.now()}`,
-        startDate, endDate,
-        recordTypeFilters: ['powerBIAudit'],
-        // Broad — we filter client-side since operation names may vary
-      }),
-      listDataAgents(workspaceId),
-    ]);
-
+    const [agents] = await Promise.all([listDataAgents(workspaceId)]);
     const agentIds  = new Set(agents.filter(a => a.id).map(a => a.id.toLowerCase()));
     const agentById = Object.fromEntries(
       agents.filter(a => a.id).map(a => [a.id.toLowerCase(), a.displayName])
     );
 
-    const status = await pollAuditQuery(token, queryId, 60_000);
-    if (status === 'failed') {
-      return { entries: [], queryDays: days, partial: true };
+    // Fabric activity events API supports max 1-day window per request
+    const endDate   = new Date();
+    const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const allEvents = [];
+    let partial     = false;
+
+    let cursor = new Date(startDate);
+    while (cursor < endDate) {
+      const chunkEnd = new Date(Math.min(cursor.getTime() + 24 * 60 * 60 * 1000, endDate.getTime()));
+      // Fabric requires single-quoted ISO strings in the query string
+      const startStr = cursor.toISOString();
+      const endStr   = chunkEnd.toISOString();
+
+      let url = `${FABRIC_BASE}/admin/activityEvents?startDateTime='${startStr}'&endDateTime='${endStr}'`;
+      while (url) {
+        const result = await jsonRequest(url, { token });
+        if (!result.ok) {
+          console.warn(`[DataAgentLogs] activityEvents ${startStr} failed (${result.status}):`, JSON.stringify(result.data).slice(0, 200));
+          partial = true;
+          break;
+        }
+        allEvents.push(...(result.data.activityEventEntities ?? []));
+        url = result.data.continuationUri ?? null;
+      }
+      cursor = chunkEnd;
     }
 
-    const raw = await getAuditRecords(token, queryId);
-    const entries = raw
-      .map(normaliseRecord)
-      .filter(r => {
-        // Keep if workspace matches (or no workspace filter in auditData)
-        const wsMatch = !workspaceId || !r.workspaceId || r.workspaceId.toLowerCase() === workspaceId.toLowerCase();
+    const entries = allEvents
+      .filter(e => {
+        const wsId = (e.WorkspaceId ?? '').toLowerCase();
+        const wsMatch = !workspaceId || !wsId || wsId === workspaceId.toLowerCase();
         if (!wsMatch) return false;
-        // Keep if matches a known agent ID, or operation/type looks agent-related
-        const agentMatch  = r.itemId  && agentIds.has(r.itemId.toLowerCase());
-        const objMatch    = r.objectId && agentIds.has(r.objectId.toLowerCase());
-        const nameMatch   = /agent|ai/i.test(r.itemType) || /agent|ai/i.test(r.operationName);
-        return agentMatch || objMatch || nameMatch;
+        const isAgentKind  = (e.ArtifactKind ?? '').toLowerCase() === 'dataagent';
+        const isKnownAgent = e.ArtifactId && agentIds.has(e.ArtifactId.toLowerCase());
+        return isAgentKind || isKnownAgent;
       })
-      .map(r => ({
-        ...r,
-        agentId   : r.itemId   || r.objectId || '',
-        agentName : agentById[(r.itemId  || r.objectId || '').toLowerCase()] ?? r.itemName ?? '',
-        prompt    : '',
-        completion: '',
-        tokenCount: undefined,
-        duration  : undefined,
-      }));
+      .map(e => {
+        const agentId = (e.ArtifactId ?? '');
+        return {
+          id               : e.Id ?? `${e.CreationTime}-${agentId}`,
+          createdDateTime  : e.CreationTime,
+          userId           : e.UserId ?? '',
+          userPrincipalName: e.UserPrincipalName ?? e.UserId ?? '',
+          workspaceId      : e.WorkspaceId ?? workspaceId,
+          operationName    : e.Activity ?? e.Operation ?? '',
+          itemId           : agentId,
+          itemName         : e.ArtifactName ?? '',
+          agentId,
+          agentName        : agentById[agentId.toLowerCase()] ?? e.ArtifactName ?? '',
+          prompt           : '',
+          completion       : '',
+          tokenCount       : undefined,
+          duration         : undefined,
+        };
+      });
 
-    return { entries, queryDays: days, partial: status === 'timeout' };
+    return { entries, queryDays: days, partial };
   } catch (err) {
     console.error('[PurviewLogs] queryDataAgentActivity error:', err.message);
     return { entries: [], queryDays: days, partial: true, error: err.message };
