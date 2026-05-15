@@ -10,6 +10,7 @@ import {
   Open24Regular,
   Bot24Regular,
   Dismiss24Regular,
+  PeopleTeam24Regular,
 } from '@fluentui/react-icons';
 import {
   Button,
@@ -28,12 +29,13 @@ import { SpStatusBadge } from './components/SpStatusBadge';
 import { callGetItem } from '../../controller/ItemCRUDController';
 import { ItemsView } from './views/ItemsView';
 import { DataQualityView } from './views/DataQualityView';
+import { AccessManagementView } from './views/AccessManagementView';
 
 interface GovernlyItemEditorProps {
   workloadClient: WorkloadClientAPI;
 }
 
-type ViewKey = 'items' | 'data-quality';
+type ViewKey = 'items' | 'data-quality' | 'access';
 
 interface NavItem {
   key: ViewKey;
@@ -45,6 +47,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { key: 'items',        labelKey: 'Nav_Items',       defaultLabel: 'Workspace Items', icon: <AppsList24Regular /> },
   { key: 'data-quality', labelKey: 'Nav_DataQuality', defaultLabel: 'Data Quality',   icon: <CheckmarkStarburst24Regular /> },
+  { key: 'access',       labelKey: 'Nav_Access',      defaultLabel: 'Access Management', icon: <PeopleTeam24Regular /> },
 ];
 
 
@@ -259,6 +262,8 @@ const GovernlyItemEditor: React.FC<GovernlyItemEditorProps> = ({ workloadClient 
         );
       case 'data-quality':
         return <DataQualityView apiClient={apiClient} workspaceId={workspaceId ?? ''} workloadClient={workloadClient} refreshTrigger={refreshTrigger} />;
+      case 'access':
+        return <AccessManagementView workspaceId={workspaceId ?? ''} client={apiClient} />;
       default:
         return null;
     }
