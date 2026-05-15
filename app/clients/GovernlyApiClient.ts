@@ -104,6 +104,32 @@ export interface SpConsentUrls {
   bootstrapUrl: string;
 }
 
+export interface GroupMember {
+  id: string;
+  displayName: string;
+  email: string;
+  addedAt: string | null;   // ISO-8601 or null if audit log unavailable
+  groupId: string;
+}
+
+export interface AccessPrincipal {
+  id: string;
+  displayName: string;
+  type: 'User' | 'Group' | 'ServicePrincipal';
+  email?: string;
+}
+
+export interface WorkspaceRoleAssignment {
+  id: string;
+  role: string;
+  principal: AccessPrincipal;
+  members?: GroupMember[];   // only present when principal.type === 'Group'
+}
+
+export interface WorkspaceAccessReport {
+  assignments: WorkspaceRoleAssignment[];
+}
+
 /**
  * GovernlyApiClient
  *
@@ -457,6 +483,21 @@ export class GovernlyApiClient {
     const resp = await fetch('/api/sp-consent-url');
     if (!resp.ok) throw new Error(`getSpConsentUrl failed (${resp.status}): ${await resp.text()}`);
     return resp.json() as Promise<SpConsentUrls>;
+  }
+
+  // ── Access Management ────────────────────────────────────────────────────
+
+  async getWorkspaceAccess(workspaceId: string): Promise<WorkspaceAccessReport> {
+    const qs = new URLSearchParams({ workspaceId });
+    const resp = await fetch(`/api/access/roles?${qs}`);
+    if (!resp.ok) throw new Error(`getWorkspaceAccess failed (${resp.status}): ${await resp.text()}`);
+    return resp.json() as Promise<WorkspaceAccessReport>;
+  }
+
+  async revokeGroupMember(groupId: string, memberId: string): Promise<void> {
+    const qs = new URLSearchParams({ groupId, memberId });
+    const resp = await fetch(`/api/access/group-member?${qs}`, { method: 'DELETE' });
+    if (!resp.ok) throw new Error(`revokeGroupMember failed (${resp.status}): ${await resp.text()}`);
   }
 
   // ── Data Quality ─────────────────────────────────────────────────────────────
