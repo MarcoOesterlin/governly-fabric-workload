@@ -133,16 +133,21 @@ async function listDataAgents(workspaceId) {
 function normaliseRecord(raw) {
   const ad = raw.auditData ?? {};
   return {
-    id              : raw.id,
-    createdDateTime : raw.createdDateTime,
-    userId          : raw.userId ?? ad.UserId ?? '',
-    operation       : raw.operation ?? '',
-    service         : raw.service ?? '',
-    objectId        : raw.objectId ?? '',
-    workspaceId     : ad.WorkSpaceId ?? ad.WorkspaceId ?? '',
-    itemName        : ad.ArtifactName ?? ad.ItemName ?? ad.ReportName ?? '',
-    itemType        : ad.ArtifactKind ?? ad.ItemKind ?? ad.ObjectType ?? '',
-    itemId          : ad.ArtifactId   ?? ad.ItemId   ?? '',
+    id                : raw.id,
+    createdDateTime   : raw.createdDateTime,
+    userId            : raw.userId ?? ad.UserId ?? '',
+    userPrincipalName : raw.userPrincipalName ?? ad.UserPrincipalName ?? ad.UserId ?? '',
+    operationName     : raw.operation ?? '',
+    service           : raw.service ?? '',
+    objectId          : raw.objectId ?? '',
+    workspaceId       : ad.WorkSpaceId ?? ad.WorkspaceId ?? '',
+    itemName          : ad.ArtifactName ?? ad.ItemName ?? ad.ReportName ?? '',
+    itemType          : ad.ArtifactKind ?? ad.ItemKind ?? ad.ObjectType ?? '',
+    itemId            : ad.ArtifactId   ?? ad.ItemId   ?? '',
+    clientIP          : raw.clientIp    ?? raw.clientIP ?? '',
+    userAgent         : raw.userAgent   ?? '',
+    result            : raw.resultStatus ?? raw.result ?? '',
+    additionalDetails : raw.additionalDetails ?? [],
   };
 }
 
@@ -235,13 +240,17 @@ async function queryDataAgentActivity(workspaceId, days = 30) {
         // Keep if matches a known agent ID, or operation/type looks agent-related
         const agentMatch  = r.itemId  && agentIds.has(r.itemId.toLowerCase());
         const objMatch    = r.objectId && agentIds.has(r.objectId.toLowerCase());
-        const nameMatch   = /agent|ai/i.test(r.itemType) || /agent|ai/i.test(r.operation);
+        const nameMatch   = /agent|ai/i.test(r.itemType) || /agent|ai/i.test(r.operationName);
         return agentMatch || objMatch || nameMatch;
       })
       .map(r => ({
         ...r,
-        agentId  : r.itemId   || r.objectId || '',
-        agentName: agentById[(r.itemId  || r.objectId || '').toLowerCase()] ?? r.itemName ?? '',
+        agentId   : r.itemId   || r.objectId || '',
+        agentName : agentById[(r.itemId  || r.objectId || '').toLowerCase()] ?? r.itemName ?? '',
+        prompt    : '',
+        completion: '',
+        tokenCount: undefined,
+        duration  : undefined,
       }));
 
     return { entries, queryDays: days, partial: status === 'timeout' };

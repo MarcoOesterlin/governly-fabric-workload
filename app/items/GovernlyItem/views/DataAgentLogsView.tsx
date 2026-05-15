@@ -167,14 +167,14 @@ export const DataAgentLogsView: React.FC<DataAgentLogsViewProps> = ({ workspaceI
                     <td style={{ ...tdStyle, whiteSpace: 'nowrap', color: tokens.colorNeutralForeground3 }}>
                       {formatDateTime(entry.createdDateTime)}
                     </td>
-                    <td style={tdStyle}>{entry.userId}</td>
+                    <td style={tdStyle}>{entry.userPrincipalName || entry.userId}</td>
                     <td style={tdStyle}>
                       <span style={{ fontWeight: 500 }}>{entry.agentName || '—'}</span>
                       {entry.agentId && (
                         <div style={{ fontSize: 11, color: tokens.colorNeutralForeground3 }}>{entry.agentId}</div>
                       )}
                     </td>
-                    <td style={{ ...tdStyle, color: tokens.colorNeutralForeground3 }}>{entry.operation || '—'}</td>
+                    <td style={{ ...tdStyle, color: tokens.colorNeutralForeground3 }}>{entry.operationName || '—'}</td>
                   </tr>
                 ))}
               </tbody>

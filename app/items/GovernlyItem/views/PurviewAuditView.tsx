@@ -90,11 +90,11 @@ export const PurviewAuditView: React.FC<PurviewAuditViewProps> = ({ workspaceId,
   const { uniqueOps, opCounts, filtered } = useMemo(() => {
     const records: AuditRecord[] = report?.records ?? [];
     const counts: Record<string, number> = {};
-    for (const r of records) counts[r.operation] = (counts[r.operation] ?? 0) + 1;
+    for (const r of records) counts[r.operationName] = (counts[r.operationName] ?? 0) + 1;
     return {
       uniqueOps: Object.keys(counts).sort(),
       opCounts : counts,
-      filtered : records.filter(r => !filterOp || r.operation === filterOp),
+      filtered : records.filter(r => !filterOp || r.operationName === filterOp),
     };
   }, [report, filterOp]);
 
@@ -187,8 +187,8 @@ export const PurviewAuditView: React.FC<PurviewAuditViewProps> = ({ workspaceId,
                     <td style={{ ...tdStyle, whiteSpace: 'nowrap', color: tokens.colorNeutralForeground3 }}>
                       {formatDateTime(record.createdDateTime)}
                     </td>
-                    <td style={tdStyle}>{record.userId}</td>
-                    <td style={tdStyle}><OperationBadge operation={record.operation} /></td>
+                    <td style={tdStyle}>{record.userPrincipalName || record.userId}</td>
+                    <td style={tdStyle}><OperationBadge operation={record.operationName} /></td>
                     <td style={tdStyle}>{record.itemName || record.objectId || '—'}</td>
                     <td style={{ ...tdStyle, color: tokens.colorNeutralForeground3 }}>{record.itemType || '—'}</td>
                   </tr>

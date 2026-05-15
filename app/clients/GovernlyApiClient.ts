@@ -133,15 +133,20 @@ export interface WorkspaceAccessReport {
 
 export interface AuditRecord {
   id: string;
-  createdDateTime: string;   // ISO-8601
-  userId: string;            // user email/UPN
-  operation: string;
+  createdDateTime: string;     // ISO-8601
+  userId: string;              // GUID from Graph API
+  userPrincipalName: string;   // human-readable email/UPN
+  operationName: string;
   service: string;
   objectId: string;
   workspaceId: string;
   itemName: string;
   itemType: string;
   itemId: string;
+  clientIP: string;
+  userAgent: string;
+  result: string;
+  additionalDetails: unknown[];
 }
 
 export interface FabricAuditReport {
@@ -154,6 +159,10 @@ export interface FabricAuditReport {
 export interface DataAgentLogEntry extends AuditRecord {
   agentId: string;
   agentName: string;
+  prompt?: string;
+  completion?: string;
+  tokenCount?: number;
+  duration?: number;
 }
 
 export interface DataAgentLogsReport {
