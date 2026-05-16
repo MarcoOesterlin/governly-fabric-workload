@@ -105,12 +105,42 @@ function registerDevServerApis(app) {
     }
   });
 
+  app.post('/api/sp-grant-permissions', async (_req, res) => {
+    try {
+      const status = await spProvisioning.grantMissingPermissions();
+      res.json(status);
+    } catch (err) {
+      console.error('[GrantPermissions] Error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post('/api/sp-setup', async (_req, res) => {
     try {
       const status = await spProvisioning.provisionSp();
       res.json(status);
     } catch (err) {
       console.error('[SpSetup] Error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/sp-purview-audit-role', async (_req, res) => {
+    try {
+      const result = await spProvisioning.addSpToPurviewAuditRole();
+      res.json(result);
+    } catch (err) {
+      console.error('[PurviewAuditRole] Error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/access/audit-retention', async (_req, res) => {
+    try {
+      const days = await accessManagement.getAuditLogRetentionDays();
+      res.json({ days });
+    } catch (err) {
+      console.error('[AuditRetention] Error:', err.message);
       res.status(500).json({ error: err.message });
     }
   });
@@ -173,8 +203,8 @@ function registerDevServerApis(app) {
       return res.status(400).json({ error: 'Query param "days" must be an integer between 1 and 365.' });
     }
     try {
-      const report = await purviewLogs.queryFabricActivity(workspaceId, lookbackDays);
-      res.json(report);
+      const report = await purviewLogs.queryGraphAllWorkspaceActivity(workspaceId, lookbackDays);
+      res.json({ records: report.entries, queryDays: report.queryDays, partial: report.partial });
     } catch (err) {
       console.error('[FabricAudit] Error:', err.message);
       res.status(500).json({ error: err.message });
@@ -193,6 +223,22 @@ function registerDevServerApis(app) {
       res.json(report);
     } catch (err) {
       console.error('[DataAgentLogs] Error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/audit/workspace-activity', async (req, res) => {
+    const { workspaceId, days } = req.query;
+    if (!workspaceId) return res.status(400).json({ error: 'Query param "workspaceId" is required.' });
+    const lookbackDays = days !== undefined ? Number(days) : 30;
+    if (isNaN(lookbackDays) || lookbackDays < 1 || lookbackDays > 365) {
+      return res.status(400).json({ error: 'Query param "days" must be an integer between 1 and 365.' });
+    }
+    try {
+      const report = await purviewLogs.queryWorkspaceActivity(workspaceId, lookbackDays);
+      res.json(report);
+    } catch (err) {
+      console.error('[WorkspaceActivity] Error:', err.message);
       res.status(500).json({ error: err.message });
     }
   });

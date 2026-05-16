@@ -90,6 +90,7 @@ export interface SpPermissionStatus {
   name: string;
   granted: boolean;
   cliCovered?: boolean;
+  api?: string;
 }
 
 export interface SpStatus {
@@ -99,6 +100,7 @@ export interface SpStatus {
   secretExpiry: string | null;
   daysRemaining: number | null;
   permissions: SpPermissionStatus[];
+  objectId: string | null;
 }
 
 export interface SpConsentUrls {
@@ -116,9 +118,11 @@ export interface OversharingFlags {
 export interface ItemUser {
   identifier: string;
   displayName: string;
+  email: string | null;
   principalType: string;
   accessRights: string[];
   isExternal: boolean;
+  isExternalDomain: boolean;
   grantedBy: string | null;
   grantedAt: string | null;
 }
@@ -160,8 +164,60 @@ export interface AccessRoleAssignment {
   members?: GroupMember[];   // only present when principal.type === 'Group'
 }
 
+export interface OneLakeEntraMember {
+  objectId: string;
+  displayName: string;
+  email: string | null;
+  type: 'User' | 'Group' | 'ServicePrincipal';
+}
+
+export interface OneLakeFabricItemMember {
+  sourcePath: string;
+  itemAccess: string[];
+  resolvedItem: string;
+  resolvedWorkspace: string | null;
+  expandedUsers: Array<{
+    id: string;
+    displayName: string;
+    email: string | null;
+    principalType: string;
+  }>;
+}
+
+export interface OneLakeRole {
+  name: string;
+  permissions: string[];
+  entraMembers: OneLakeEntraMember[];
+  fabricItemMembers: OneLakeFabricItemMember[];
+}
+
+export interface OneLakeLakehouse {
+  id: string;
+  name: string;
+  roles: OneLakeRole[];
+}
+
+export interface DirectItemShareUser {
+  id: string;
+  displayName: string;
+  email: string | null;
+  identifier: string | null;
+  principalType: string;
+  accessRight: string;
+  isExternal: boolean;
+}
+
+export interface DirectItemShare {
+  itemId: string;
+  itemName: string;
+  itemType: string;
+  users: DirectItemShareUser[];
+}
+
 export interface WorkspaceAccessReport {
   assignments: AccessRoleAssignment[];
+  oneLakeSecurity?: OneLakeLakehouse[];
+  directItemShares?: DirectItemShare[];
 }
 
 export interface AuditRecord {
@@ -171,8 +227,10 @@ export interface AuditRecord {
   userPrincipalName: string;   // human-readable email/UPN
   operationName: string;
   service: string;
+  recordType: string;
   objectId: string;
   workspaceId: string;
+  workspaceName: string;
   itemName: string;
   itemType: string;
   itemId: string;
@@ -180,6 +238,7 @@ export interface AuditRecord {
   userAgent: string;
   result: string;
   additionalDetails: unknown[];
+  raw?: Record<string, unknown>;
 }
 
 export interface FabricAuditReport {
@@ -196,12 +255,23 @@ export interface DataAgentLogEntry extends AuditRecord {
   completion?: string;
   tokenCount?: number;
   duration?: number;
+  raw?: Record<string, unknown>;
 }
 
 export interface DataAgentLogsReport {
   entries: DataAgentLogEntry[];
   queryDays: number;
   partial: boolean;
+  error?: string;
+}
+
+export type WorkspaceActivityEntry = AuditRecord;
+
+export interface WorkspaceActivityReport {
+  entries: WorkspaceActivityEntry[];
+  queryDays: number;
+  partial: boolean;
+  lastRefreshed?: string;
   error?: string;
 }
 
@@ -560,6 +630,18 @@ export class GovernlyApiClient {
     return resp.json() as Promise<SpConsentUrls>;
   }
 
+  async grantMissingPermissions(): Promise<SpStatus> {
+    const resp = await fetch('/api/sp-grant-permissions', { method: 'POST' });
+    if (!resp.ok) throw new Error(`grantMissingPermissions failed (${resp.status}): ${await resp.text()}`);
+    return resp.json() as Promise<SpStatus>;
+  }
+
+  async addSpToPurviewAuditRole(): Promise<{ success: boolean; output: string; spId: string }> {
+    const resp = await fetch('/api/sp-purview-audit-role', { method: 'POST' });
+    if (!resp.ok) throw new Error(`addSpToPurviewAuditRole failed (${resp.status}): ${await resp.text()}`);
+    return resp.json();
+  }
+
   // ── Access Management ────────────────────────────────────────────────────
 
   async getWorkspaceAccess(workspaceId: string): Promise<WorkspaceAccessReport> {
@@ -573,6 +655,17 @@ export class GovernlyApiClient {
     const qs = new URLSearchParams({ groupId, memberId });
     const resp = await fetch(`/api/access/group-member?${qs}`, { method: 'DELETE' });
     if (!resp.ok) throw new Error(`revokeGroupMember failed (${resp.status}): ${await resp.text()}`);
+  }
+
+  async getAuditLogRetentionDays(): Promise<number | null> {
+    try {
+      const resp = await fetch('/api/access/audit-retention');
+      if (!resp.ok) return null;
+      const data = await resp.json() as { days: number | null };
+      return data.days ?? null;
+    } catch {
+      return null;
+    }
   }
 
   async getOversharingReport(workspaceId: string): Promise<OversharingReport> {
@@ -602,6 +695,33 @@ export class GovernlyApiClient {
     const resp = await fetch(`/api/audit/data-agent-logs?${qs}`);
     if (!resp.ok) throw new Error(`getDataAgentLogs failed (${resp.status}): ${await resp.text()}`);
     return resp.json() as Promise<DataAgentLogsReport>;
+  }
+
+  async getWorkspaceActivity(workspaceId: string, days = 30): Promise<WorkspaceActivityReport> {
+    const qs = new URLSearchParams({ workspaceId, days: String(days) });
+    const resp = await fetch(`/api/audit/workspace-activity?${qs}`);
+    if (!resp.ok) throw new Error(`getWorkspaceActivity failed (${resp.status}): ${await resp.text()}`);
+    return resp.json() as Promise<WorkspaceActivityReport>;
+  }
+
+  async getCachedActivityLogs(workspaceId: string): Promise<WorkspaceActivityReport> {
+    const qs = new URLSearchParams({ workspaceId });
+    const resp = await fetch(`/api/audit/activity-logs-cached?${qs}`);
+    if (!resp.ok) throw new Error(`getCachedActivityLogs failed (${resp.status}): ${await resp.text()}`);
+    return resp.json() as Promise<WorkspaceActivityReport>;
+  }
+
+  async startActivityLogsRefresh(workspaceId: string, days = 30): Promise<void> {
+    const qs = new URLSearchParams({ workspaceId, days: String(days) });
+    const resp = await fetch(`/api/audit/refresh-activity-logs?${qs}`, { method: 'POST' });
+    if (!resp.ok) throw new Error(`refreshActivityLogs failed (${resp.status}): ${await resp.text()}`);
+  }
+
+  async getActivityLogsRefreshStatus(workspaceId: string): Promise<{ status: string; error?: string }> {
+    const qs = new URLSearchParams({ workspaceId });
+    const resp = await fetch(`/api/audit/refresh-status?${qs}`);
+    if (!resp.ok) throw new Error(`getRefreshStatus failed (${resp.status})`);
+    return resp.json();
   }
 
   // ── Data Quality ─────────────────────────────────────────────────────────────

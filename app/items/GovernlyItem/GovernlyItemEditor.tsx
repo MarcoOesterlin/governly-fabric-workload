@@ -33,7 +33,7 @@ import { ItemsView } from './views/ItemsView';
 import { DataQualityView } from './views/DataQualityView';
 import { AccessManagementView } from './views/AccessManagementView';
 import { OversharingReportView } from './views/OversharingReportView';
-import { DataAgentLogsView } from './views/DataAgentLogsView';
+import { ActivityLogsView } from './views/ActivityLogsView';
 
 interface GovernlyItemEditorProps {
   workloadClient: WorkloadClientAPI;
@@ -53,7 +53,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'data-quality', labelKey: 'Nav_DataQuality', defaultLabel: 'Data Quality',   icon: <CheckmarkStarburst24Regular /> },
   { key: 'access',       labelKey: 'Nav_Access',      defaultLabel: 'Access Management', icon: <PeopleTeam24Regular /> },
   { key: 'audit',        labelKey: 'Nav_Audit',       defaultLabel: 'Oversharing Report', icon: <DocumentSearch24Regular /> },
-  { key: 'agent-logs',   labelKey: 'Nav_AgentLogs',   defaultLabel: 'Agent Logs',       icon: <ChatBubblesQuestion24Regular /> },
+  { key: 'agent-logs',   labelKey: 'Nav_AgentLogs',   defaultLabel: 'Workspace Activity Logs', icon: <ChatBubblesQuestion24Regular /> },
 ];
 
 
@@ -273,7 +273,7 @@ const GovernlyItemEditor: React.FC<GovernlyItemEditorProps> = ({ workloadClient 
       case 'audit':
         return <OversharingReportView workspaceId={workspaceId} client={apiClient} />;
       case 'agent-logs':
-        return <DataAgentLogsView workspaceId={workspaceId ?? ''} client={apiClient} />;
+        return <ActivityLogsView workspaceId={workspaceId ?? ''} client={apiClient} />;
       default:
         return null;
     }

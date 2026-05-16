@@ -9,10 +9,11 @@
  */
 
 const https = require('https');
-const { acquireGraphTokenViaClientCredentials, acquireFabricToken } = require('./governlyProxy');
+const { acquireGraphTokenViaClientCredentials, acquireFabricToken, acquireAzToken, acquirePowerBIToken } = require('./governlyProxy');
 
 const GRAPH_BASE    = 'https://graph.microsoft.com/v1.0';
 const FABRIC_BASE   = 'https://api.fabric.microsoft.com/v1';
+const POWERBI_BASE  = 'https://api.powerbi.com/v1.0/myorg';
 
 /**
  * Minimal JSON-over-HTTPS helper.
@@ -162,14 +163,276 @@ async function getGroupAuditDates(groupId) {
 }
 
 /**
+ * Maps a set of OneLake itemAccess values (e.g. ["ReadAll"]) to the minimum
+ * Fabric workspace roles whose members implicitly satisfy that access level.
+ */
+const ITEM_ACCESS_TO_WS_ROLES = {
+  ReadAll:           ['Admin', 'Member', 'Contributor'],
+  ReadWriteAll:      ['Admin', 'Member'],
+  ReadWriteAllExplore: ['Admin', 'Member'],
+  Write:             ['Admin', 'Member', 'Contributor'],
+  Execute:           ['Admin', 'Member', 'Contributor'],
+};
+
+/**
+ * Given a set of itemAccess strings and raw workspace role assignments, returns
+ * the subset of direct-user assignments that satisfy all requested access levels.
+ */
+function expandViaWorkspaceRoles(itemAccess, wsRoleAssignments) {
+  // Determine which workspace roles satisfy ALL required access levels
+  const candidateRoles = itemAccess.length === 0
+    ? ['Admin', 'Member', 'Contributor', 'Viewer']
+    : itemAccess.reduce((acc, a) => {
+        const roles = ITEM_ACCESS_TO_WS_ROLES[a] ?? ['Admin', 'Member', 'Contributor'];
+        return acc === null ? roles : acc.filter(r => roles.includes(r));
+      }, null) ?? ['Admin', 'Member', 'Contributor'];
+
+  return wsRoleAssignments
+    .filter(ra => candidateRoles.includes(ra.role) && ra.principal.type === 'User')
+    .map(ra => ({
+      id:            ra.principal.id,
+      displayName:   ra.principal.displayName,
+      email:         ra.principal.userPrincipalName ?? ra.principal.mail ?? null,
+      principalType: 'User',
+    }));
+}
+
+/**
+ * Fetches OneLake data access roles for all lakehouses in a workspace.
+ * Returns [] if no lakehouses exist or if OneLake security is not enabled.
+ *
+ * @param {string} workspaceId
+ * @param {Array}  wsRoleAssignments  Raw workspace role assignments (fallback for expansion)
+ * @returns {Promise<Array<{id, name, roles}>>}
+ */
+async function getLakehouseDataAccessRoles(workspaceId, wsRoleAssignments = []) {
+  const token = acquireFabricToken();
+
+  // 1. List all lakehouses in the workspace
+  const lhResult = await jsonRequest(
+    `${FABRIC_BASE}/workspaces/${encodeURIComponent(workspaceId)}/lakehouses`,
+    { token }
+  );
+  if (!lhResult.ok) {
+    console.warn(`[AccessMgmt] list lakehouses failed (${lhResult.status}) — skipping OneLake security`);
+    return [];
+  }
+
+  // Pre-fetch all items in this workspace so we can resolve sourcePath IDs to names
+  const itemsResult = await jsonRequest(
+    `${FABRIC_BASE}/workspaces/${encodeURIComponent(workspaceId)}/items`,
+    { token }
+  );
+  /** @type {Map<string, string>}  itemId → displayName */
+  const itemNameMap = new Map();
+  for (const item of itemsResult.data?.value ?? []) {
+    itemNameMap.set(item.id, item.displayName);
+  }
+
+  /**
+   * Resolves a fabricItemMember sourcePath to a readable name AND expands the
+   * virtual membership to actual users by fetching /items/{id}/users.
+   */
+  async function resolveSourcePath(sourcePath, itemAccess) {
+    const parts = sourcePath.split('/');
+    let resolvedItem = null;
+    let resolvedWorkspace = null;
+    let expandedUsers = [];
+
+    if (parts.length === 2) {
+      const [wsId, itemId] = parts;
+      resolvedItem = itemNameMap.get(itemId) ?? null;
+
+      if (wsId !== workspaceId) {
+        // Cross-workspace reference — try to fetch the workspace name
+        const wsResult = await jsonRequest(
+          `${FABRIC_BASE}/workspaces/${encodeURIComponent(wsId)}`,
+          { token }
+        ).catch(() => null);
+        resolvedWorkspace = wsResult?.data?.displayName ?? wsId;
+
+        // Try to fetch the item name if it's in a different workspace
+        if (!resolvedItem) {
+          const extItemResult = await jsonRequest(
+            `${FABRIC_BASE}/workspaces/${encodeURIComponent(wsId)}/items/${encodeURIComponent(itemId)}`,
+            { token }
+          ).catch(() => null);
+          resolvedItem = extItemResult?.data?.displayName ?? itemId;
+        }
+      } else {
+        resolvedItem = resolvedItem ?? itemId;
+      }
+
+      // Expand virtual membership: fetch all users of that item
+      const usersResult = await jsonRequest(
+        `${FABRIC_BASE}/workspaces/${encodeURIComponent(wsId)}/items/${encodeURIComponent(itemId)}/users`,
+        { token }
+      ).catch(() => null);
+
+      if (usersResult?.ok) {
+        const allUsers = usersResult.data?.value ?? [];
+        expandedUsers = allUsers
+          .filter(u => {
+            const access = u.itemAccessDetails?.type ?? u.itemAccess;
+            return itemAccess.length === 0 ||
+              itemAccess.some(a =>
+                access === a || (Array.isArray(access) && access.includes(a))
+              );
+          })
+          .map(u => ({
+            id:            u.id ?? u.objectId,
+            displayName:   u.displayName,
+            email:         u.emailAddress ?? u.email ?? null,
+            principalType: u.principalType ?? 'User',
+          }));
+      } else if (wsId === workspaceId && wsRoleAssignments.length > 0) {
+        // /items/{id}/users is not supported for this item type — fall back to
+        // workspace role assignments. Users with matching workspace roles implicitly
+        // satisfy the itemAccess requirement.
+        expandedUsers = expandViaWorkspaceRoles(itemAccess, wsRoleAssignments);
+      }
+    } else {
+      // Single-segment path — just an itemId
+      resolvedItem = itemNameMap.get(sourcePath) ?? sourcePath;
+    }
+
+    return { sourcePath, itemAccess, resolvedItem, resolvedWorkspace, expandedUsers };
+  }
+
+  const lakehouses = lhResult.data.value ?? [];
+  const results = [];
+
+  // 2. For each lakehouse, fetch data access roles (parallel)
+  await Promise.all(lakehouses.map(async (lh) => {
+    const rolesResult = await jsonRequest(
+      `${FABRIC_BASE}/workspaces/${encodeURIComponent(workspaceId)}/items/${encodeURIComponent(lh.id)}/dataAccessRoles`,
+      { token }
+    );
+
+    if (rolesResult.status === 400) {
+      // OneLake security not enabled for this lakehouse — silently skip
+      return;
+    }
+    if (!rolesResult.ok) {
+      console.warn(`[AccessMgmt] dataAccessRoles for ${lh.displayName} (${lh.id}): ${rolesResult.status}`);
+      return;
+    }
+
+    const rawRoles = rolesResult.data.value ?? [];
+    console.log(`[AccessMgmt] OneLake security for ${lh.displayName}: ${rawRoles.length} role(s)`);
+
+    const roles = await Promise.all(rawRoles.map(async role => {
+      // Extract permissions — try top-level array first, fall back to decisionRules
+      let permissions = [];
+      if (Array.isArray(role.permissions) && role.permissions.length > 0) {
+        permissions = role.permissions;
+      } else {
+        for (const rule of role.decisionRules ?? []) {
+          if (rule.effect === 'Permit') {
+            for (const perm of rule.permission ?? []) {
+              for (const val of perm.attributeValueIncludedIn ?? []) {
+                if (!permissions.includes(val)) permissions.push(val);
+              }
+            }
+          }
+        }
+      }
+
+      // Explicit Entra members (named users / groups / service principals)
+      const entraMembers = (role.members?.microsoftEntraMembers ?? []).map(m => ({
+        objectId:    m.objectId,
+        displayName: m.displayName ?? m.objectId,
+        email:       m.email ?? m.userPrincipalName ?? null,
+        type:        m.type ?? 'User',
+      }));
+
+      // Virtual members — resolve sourcePath UUIDs to human-readable names
+      const fabricItemMembers = await Promise.all(
+        (role.members?.fabricItemMembers ?? []).map(m =>
+          resolveSourcePath(m.sourcePath, m.itemAccess ?? [])
+        )
+      );
+
+      return { name: role.name, permissions, entraMembers, fabricItemMembers };
+    }));
+
+    results.push({ id: lh.id, name: lh.displayName, roles });
+  }));
+
+  return results;
+}
+
+/** Power BI item types and their API segment + access right field */
+const POWERBI_ITEM_ENDPOINTS = {
+  SemanticModel:   { segment: 'datasets',    accessField: 'datasetUserAccessRight' },
+  Report:          { segment: 'reports',     accessField: 'reportUserAccessRight' },
+  Dashboard:       { segment: 'dashboards',  accessField: 'dashboardUserAccessRight' },
+  PaginatedReport: { segment: 'reports',     accessField: 'reportUserAccessRight' },
+};
+
+/**
+ * Fetches users who have been granted direct item-level access on Power BI items
+ * (SemanticModel, Report, Dashboard) using the Power BI REST API.
+ * Only returns users with an explicit access right (not "None" — workspace members
+ * who inherited access are typically returned with "None" and are excluded).
+ *
+ * @param {string} workspaceId
+ * @returns {Promise<Array<{itemId, itemName, itemType, users}>>}
+ */
+async function getDirectItemShares(workspaceId) {
+  const fabricToken = acquireFabricToken();
+  const itemsResult = await jsonRequest(
+    `${FABRIC_BASE}/workspaces/${encodeURIComponent(workspaceId)}/items`,
+    { token: fabricToken }
+  ).catch(() => null);
+  if (!itemsResult?.ok) return [];
+
+  const powerBIToken = acquirePowerBIToken();
+  const items = (itemsResult.data?.value ?? [])
+    .filter(i => POWERBI_ITEM_ENDPOINTS[i.type]);
+
+  const results = [];
+  await Promise.all(items.map(async (item) => {
+    const { segment, accessField } = POWERBI_ITEM_ENDPOINTS[item.type];
+    const url = `${POWERBI_BASE}/groups/${encodeURIComponent(workspaceId)}/${segment}/${encodeURIComponent(item.id)}/users`;
+    const usersResult = await jsonRequest(url, { token: powerBIToken }).catch(() => null);
+    if (!usersResult?.ok) return;
+
+    const users = (usersResult.data?.value ?? [])
+      .filter(u => u[accessField] && u[accessField] !== 'None')
+      .map(u => ({
+        id:            u.graphId ?? u.identifier,
+        displayName:   u.displayName ?? u.identifier,
+        email:         u.emailAddress ?? null,
+        identifier:    u.identifier ?? null,
+        principalType: u.principalType ?? 'User',
+        accessRight:   u[accessField],
+        isExternal:    (u.identifier ?? '').includes('#EXT#') ||
+                       (u.emailAddress ?? '').includes('#EXT#'),
+      }));
+
+    if (users.length > 0) {
+      results.push({ itemId: item.id, itemName: item.displayName, itemType: item.type, users });
+    }
+  }));
+
+  return results;
+}
+
+/**
  * Builds the full access report for a workspace.
  * For each Group assignment, expands members and correlates with audit dates.
  *
  * @param {string} workspaceId
- * @returns {Promise<{ assignments: Array }>}
+ * @returns {Promise<{ assignments: Array, oneLakeSecurity: Array, directItemShares: Array }>}
  */
 async function buildAccessReport(workspaceId) {
+  // Fetch workspace roles first so they can be used as fallback for OneLake expansion
   const rawAssignments = await getWorkspaceRoles(workspaceId);
+  const [oneLakeSecurity, directItemShares] = await Promise.all([
+    getLakehouseDataAccessRoles(workspaceId, rawAssignments),
+    getDirectItemShares(workspaceId),
+  ]);
 
   const assignments = await Promise.all(rawAssignments.map(async (ra) => {
     const principal = {
@@ -198,7 +461,7 @@ async function buildAccessReport(workspaceId) {
     return { id: ra.id, role: ra.role, principal, members };
   }));
 
-  return { assignments };
+  return { assignments, oneLakeSecurity, directItemShares };
 }
 
 /**
@@ -208,7 +471,7 @@ async function buildAccessReport(workspaceId) {
  * @returns {Promise<void>}
  */
 async function removeMemberFromGroup(groupId, memberId) {
-  const token = await acquireGraphTokenViaClientCredentials();
+  const token = acquireAzToken('https://graph.microsoft.com');
   const url = `${GRAPH_BASE}/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(memberId)}/$ref`;
   const result = await jsonRequest(url, { method: 'DELETE', token });
   if (!result.ok) {
@@ -216,4 +479,31 @@ async function removeMemberFromGroup(groupId, memberId) {
   }
 }
 
-module.exports = { buildAccessReport, removeMemberFromGroup };
+/**
+ * Probes the Entra ID directoryAudit log to determine the effective retention
+ * window by fetching the oldest available entry. Returns the number of days
+ * back the logs go, or null if the audit log is inaccessible.
+ *
+ * @returns {Promise<number|null>}
+ */
+async function getAuditLogRetentionDays() {
+  const token = await acquireGraphTokenViaClientCredentials();
+  const params = new URLSearchParams({
+    '$orderby': 'activityDateTime asc',
+    '$top': '1',
+    '$select': 'activityDateTime',
+  });
+  const url = `${GRAPH_BASE}/auditLogs/directoryAudits?${params}`;
+  const result = await jsonRequest(url, { token });
+  if (!result.ok) {
+    console.warn(`[AccessMgmt] getAuditLogRetentionDays failed (${result.status}) — cannot determine retention`);
+    return null;
+  }
+  const entries = result.data.value ?? [];
+  if (entries.length === 0) return null;
+  const oldest = new Date(entries[0].activityDateTime);
+  const days = Math.floor((Date.now() - oldest.getTime()) / (1000 * 60 * 60 * 24));
+  return days;
+}
+
+module.exports = { buildAccessReport, removeMemberFromGroup, getAuditLogRetentionDays };

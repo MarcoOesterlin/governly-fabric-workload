@@ -193,7 +193,7 @@ export const FailedRowsTab: React.FC<Props> = ({
         {!runs.length && !loading && !preloadLoading && (
           <div style={{ padding: 32, color: t.muted, textAlign: 'center', fontSize: 14 }}>
             No DQ runs found. Run a notebook from the Configure tab first.
-            <div style={{ fontSize: 12, marginTop: 8, color: t.subtext }}>Results are stored in the Governly_DQ lakehouse.</div>
+            <div style={{ fontSize: 12, marginTop: 8, color: t.subtext }}>Results are stored in the Governly_Insights lakehouse.</div>
           </div>
         )}
         {runs.length > 0 && filtered.length === 0 && !loading && (

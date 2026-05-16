@@ -5,8 +5,8 @@
  *
  * GET  /api/dq-schema        ?workspaceId=&lakehouseId=&tableName=
  * POST /api/dq-notebook       { runId, workspaceId, lakehouseId, lakehouseName, tables, dimensions }
- *   → auto-provisions "Governly_DQ" lakehouse; returns { id, webUrl, dqLakehouseId }
- * GET  /api/dq-runs           ?workspaceId=  (reads from Governly_DQ lakehouse)
+ *   → auto-provisions "Governly_Insights" lakehouse; returns { id, webUrl, dqLakehouseId }
+ * GET  /api/dq-runs           ?workspaceId=  (reads from Governly_Insights lakehouse)
  * GET  /api/dq-run-summary    ?workspaceId=&runId=  (no source lakehouseId needed)
  * GET  /api/dq-failed-rows    ?workspaceId=&runId=&page=&pageSize=
  */
@@ -74,9 +74,9 @@ async function getOperationResult(token, operationId) {
 
 // ── Dedicated DQ lakehouse provisioning ──────────────────────────────────────
 
-const DQ_LAKEHOUSE_NAME = 'Governly_DQ';
+const DQ_LAKEHOUSE_NAME = 'Governly_Insights';
 
-/** Find the Governly_DQ lakehouse for a workspace; returns its ID or null. */
+/** Find the Governly_Insights lakehouse for a workspace; returns its ID or null. */
 async function findDqLakehouse(workspaceId, token) {
   const resp = await httpRequest(`${FABRIC_API}/workspaces/${workspaceId}/lakehouses`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -86,7 +86,7 @@ async function findDqLakehouse(workspaceId, token) {
   return lakehouses.find(l => l.displayName === DQ_LAKEHOUSE_NAME)?.id ?? null;
 }
 
-/** Find or create the Governly_DQ lakehouse; returns its ID. */
+/** Find or create the Governly_Insights lakehouse; returns its ID. */
 async function ensureDqLakehouse(workspaceId, token) {
   const existing = await findDqLakehouse(workspaceId, token);
   if (existing) {
@@ -97,7 +97,7 @@ async function ensureDqLakehouse(workspaceId, token) {
   console.log(`[DQ] Creating "${DQ_LAKEHOUSE_NAME}" lakehouse in workspace ${workspaceId}…`);
   const body = JSON.stringify({
     displayName: DQ_LAKEHOUSE_NAME,
-    description: 'Governly Data Quality results — stores DQ check results across all workspace lakehouses.',
+    description: 'Governly Insights — stores DQ check results and workspace activity logs.',
   });
   const createResp = await httpRequest(`${FABRIC_API}/workspaces/${workspaceId}/lakehouses`, {
     method: 'POST',
@@ -222,7 +222,7 @@ async function listOnelakeTables(workspaceId, lakehouseId) {
   return tables;
 }
 
-// ── List DQ runs from Governly_DQ lakehouse Files ────────────────────────────
+// ── List DQ runs from Governly_Insights lakehouse Files ──────────────────────
 
 async function listDqRuns(workspaceId, dqLakehouseId) {
   const token = getOneLakeToken();
@@ -253,6 +253,38 @@ async function readOneLakeFile(workspaceId, lakehouseId, filePath) {
   const resp = await httpRequest(url, { headers: { Authorization: `Bearer ${token}` } });
   if (!resp.ok) throw new Error(`OneLake read failed (${resp.status}): ${resp.body.slice(0, 200)}`);
   return JSON.parse(resp.body);
+}
+
+// ── Write JSON files to OneLake Files (ADLS Gen2 create+append+flush) ────────
+
+async function writeOneLakeFile(workspaceId, lakehouseId, filePath, data) {
+  const token = getOneLakeToken();
+  const content = JSON.stringify(data);
+  const contentBuf = Buffer.from(content, 'utf8');
+  const size = contentBuf.length;
+  const base = `${ONELAKE_DFS}/${workspaceId}/${lakehouseId}/Files/${filePath}`;
+
+  // 1. Create (or overwrite) the file
+  const createResp = await httpRequest(`${base}?resource=file&overwrite=true`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Length': '0' },
+  });
+  if (!createResp.ok) throw new Error(`OneLake create failed (${createResp.status}): ${createResp.body.slice(0, 200)}`);
+
+  // 2. Append the data
+  const appendResp = await httpRequest(`${base}?action=append&position=0`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/octet-stream', 'Content-Length': String(size) },
+    body: content,
+  });
+  if (!appendResp.ok) throw new Error(`OneLake append failed (${appendResp.status}): ${appendResp.body.slice(0, 200)}`);
+
+  // 3. Flush (commit)
+  const flushResp = await httpRequest(`${base}?action=flush&position=${size}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Length': '0' },
+  });
+  if (!flushResp.ok) throw new Error(`OneLake flush failed (${flushResp.status}): ${flushResp.body.slice(0, 200)}`);
 }
 
 // ── Trigger notebook run ──────────────────────────────────────────────────────
@@ -448,7 +480,7 @@ function registerDqRoutes(app) {
     try {
       const fabricToken = getFabricToken();
 
-      // Provision the dedicated Governly_DQ lakehouse (creates if not exists)
+      // Provision the dedicated Governly_Insights lakehouse (creates if not exists)
       const dqLakehouseId = await ensureDqLakehouse(config.workspaceId, fabricToken);
 
       // Merge this submission into the accumulated config for this workspace
@@ -527,7 +559,7 @@ function registerDqRoutes(app) {
     }
   });
 
-  // GET /api/dq-runs — reads from Governly_DQ lakehouse (no source lakehouseId needed)
+  // GET /api/dq-runs — reads from Governly_Insights lakehouse (no source lakehouseId needed)
   app.get('/api/dq-runs', async (req, res) => {
     const { workspaceId } = req.query;
     if (!workspaceId) return res.status(400).json({ error: 'workspaceId required' });
@@ -543,14 +575,14 @@ function registerDqRoutes(app) {
     }
   });
 
-  // GET /api/dq-run-summary — reads from Governly_DQ lakehouse
+  // GET /api/dq-run-summary — reads from Governly_Insights lakehouse
   app.get('/api/dq-run-summary', async (req, res) => {
     const { workspaceId, runId, year, month, day } = req.query;
     if (!workspaceId || !runId) return res.status(400).json({ error: 'workspaceId and runId required' });
     try {
       const token = getFabricToken();
       const dqLakehouseId = await findDqLakehouse(workspaceId, token);
-      if (!dqLakehouseId) return res.status(404).json({ error: 'Governly_DQ lakehouse not found' });
+      if (!dqLakehouseId) return res.status(404).json({ error: 'Governly_Insights lakehouse not found' });
       const filePath = (year && month && day)
         ? `governly_dq/year=${year}/month=${month}/day=${day}/run_id=${runId}/summary.json`
         : `governly_dq/${runId}_summary.json`; // backward compat with old flat layout
@@ -562,7 +594,7 @@ function registerDqRoutes(app) {
     }
   });
 
-  // GET /api/dq-failed-rows — reads from Governly_DQ lakehouse
+  // GET /api/dq-failed-rows — reads from Governly_Insights lakehouse
   app.get('/api/dq-failed-rows', async (req, res) => {
     const { workspaceId, runId, year, month, day } = req.query;
     const page = parseInt(req.query.page ?? '1', 10);
@@ -571,7 +603,7 @@ function registerDqRoutes(app) {
     try {
       const token = getFabricToken();
       const dqLakehouseId = await findDqLakehouse(workspaceId, token);
-      if (!dqLakehouseId) return res.status(404).json({ error: 'Governly_DQ lakehouse not found' });
+      if (!dqLakehouseId) return res.status(404).json({ error: 'Governly_Insights lakehouse not found' });
       const filePath = (year && month && day)
         ? `governly_dq/year=${year}/month=${month}/day=${day}/run_id=${runId}/failed_rows.json`
         : `governly_dq/${runId}_failed_rows.json`; // backward compat
@@ -586,6 +618,120 @@ function registerDqRoutes(app) {
     } catch (err) {
       console.error('[DQ-FailedRows]', err.message);
       res.status(404).json({ error: err.message });
+    }
+  });
+
+  // In-memory refresh job state per workspaceId
+  const refreshJobs = new Map(); // workspaceId → { status: 'running'|'done'|'error', startedAt, finishedAt, error }
+
+  /** List activity log runs from OneLake, newest first. */
+  async function listActivityLogRuns(workspaceId, lakehouseId) {
+    const token = getOneLakeToken();
+    const url = `${ONELAKE_DFS}/${workspaceId}/${lakehouseId}/Files/governly_activity_logs?resource=filesystem&recursive=true`;
+    const resp = await httpRequest(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!resp.ok) return [];
+    const paths = JSON.parse(resp.body).paths ?? [];
+    const runs = [];
+    for (const p of paths) {
+      if (!p.name || !p.name.endsWith('/entries.json')) continue;
+      const match = p.name.match(/year=(\d+)\/month=(\d+)\/day=(\d+)\/run_id=(\d{6})\/entries\.json$/);
+      if (!match) continue;
+      const [, year, month, day, runId] = match;
+      const hh = runId.slice(0, 2), mm = runId.slice(2, 4), ss = runId.slice(4, 6);
+      runs.push({ run_id: runId, run_timestamp: `${year}-${month}-${day}T${hh}:${mm}:${ss}Z`, year, month, day });
+    }
+    return runs.sort((a, b) => b.run_timestamp.localeCompare(a.run_timestamp));
+  }
+
+  // POST /api/audit/refresh-activity-logs — starts background job, returns immediately
+  app.post('/api/audit/refresh-activity-logs', (req, res) => {
+    const { workspaceId } = req.query;
+    const days = parseInt(req.query.days ?? '30', 10);
+    if (!workspaceId) return res.status(400).json({ error: 'workspaceId required' });
+
+    const existing = refreshJobs.get(workspaceId);
+    if (existing?.status === 'running') {
+      return res.json({ status: 'running', startedAt: existing.startedAt });
+    }
+
+    const job = { status: 'running', startedAt: new Date().toISOString(), finishedAt: null, error: null };
+    refreshJobs.set(workspaceId, job);
+    res.json({ status: 'running', startedAt: job.startedAt });
+
+    // Run in background — do not await
+    (async () => {
+      try {
+        const { queryDataAgentActivity } = require('./purviewLogs');
+        const fabricToken = getFabricToken();
+        const insightsLakehouseId = await ensureDqLakehouse(workspaceId, fabricToken);
+
+        console.log(`[ActivityLogs] Querying Graph Audit Log for workspaceId=${workspaceId} days=${days}…`);
+        const result = await queryDataAgentActivity(workspaceId, days);
+        const allEntries = result.entries;
+        allEntries.sort((a, b) => (b.createdDateTime ?? '').localeCompare(a.createdDateTime ?? ''));
+
+        // Build partitioned path: governly_activity_logs/year=.../month=.../day=.../run_id=HHMMSS/entries.json
+        const now = new Date();
+        const year  = String(now.getUTCFullYear());
+        const month = String(now.getUTCMonth() + 1).padStart(2, '0');
+        const day   = String(now.getUTCDate()).padStart(2, '0');
+        const runId = `${String(now.getUTCHours()).padStart(2,'0')}${String(now.getUTCMinutes()).padStart(2,'0')}${String(now.getUTCSeconds()).padStart(2,'0')}`;
+        const filePath = `governly_activity_logs/year=${year}/month=${month}/day=${day}/run_id=${runId}/entries.json`;
+
+        const payload = {
+          entries: allEntries,
+          queryDays: days,
+          partial: result.partial,
+          lastRefreshed: now.toISOString(),
+        };
+
+        await writeOneLakeFile(workspaceId, insightsLakehouseId, filePath, payload);
+        console.log(`[ActivityLogs] Stored ${allEntries.length} entries → ${filePath}`);
+
+        job.status = 'done';
+        job.finishedAt = new Date().toISOString();
+      } catch (err) {
+        console.error('[ActivityLogs-Refresh]', err.message);
+        job.status = 'error';
+        job.error = err.message;
+        job.finishedAt = new Date().toISOString();
+      }
+    })();
+  });
+
+  // GET /api/audit/refresh-status — poll job status
+  app.get('/api/audit/refresh-status', (req, res) => {
+    const { workspaceId } = req.query;
+    if (!workspaceId) return res.status(400).json({ error: 'workspaceId required' });
+    const job = refreshJobs.get(workspaceId);
+    if (!job) return res.json({ status: 'idle' });
+    res.json(job);
+  });
+
+  // GET /api/audit/activity-logs-cached — reads the latest run from Governly_Insights lakehouse
+  app.get('/api/audit/activity-logs-cached', async (req, res) => {
+    const { workspaceId } = req.query;
+    if (!workspaceId) return res.status(400).json({ error: 'workspaceId required' });
+    try {
+      const fabricToken = getFabricToken();
+      const insightsLakehouseId = await findDqLakehouse(workspaceId, fabricToken);
+      if (!insightsLakehouseId) return res.status(404).json({ error: 'Governly_Insights lakehouse not found' });
+
+      const runs = await listActivityLogRuns(workspaceId, insightsLakehouseId);
+      if (runs.length === 0) return res.status(404).json({ error: 'No cached logs yet. Click Refresh Logs to fetch.' });
+
+      const latest = runs[0];
+      const filePath = `governly_activity_logs/year=${latest.year}/month=${latest.month}/day=${latest.day}/run_id=${latest.run_id}/entries.json`;
+      const payload = await readOneLakeFile(workspaceId, insightsLakehouseId, filePath);
+      // Correct stale partial flag: if entries exist, the data is not partial
+      if (payload.entries?.length > 0) payload.partial = false;
+      res.json(payload);
+    } catch (err) {
+      if (err.message.includes('404') || err.message.includes('not found')) {
+        return res.status(404).json({ error: 'No cached logs yet. Click Refresh Logs to fetch.' });
+      }
+      console.error('[ActivityLogs-Cached]', err.message);
+      res.status(500).json({ error: err.message });
     }
   });
 }

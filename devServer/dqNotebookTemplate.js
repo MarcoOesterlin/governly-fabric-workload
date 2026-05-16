@@ -48,10 +48,10 @@ function buildDqNotebook(config) {
     `# Governly Data Quality Check\n`,
     `\n`,
     `**Source Lakehouses:** ${lhSummary}  \n`,
-    `**DQ Results Lakehouse:** Governly_DQ (resolved dynamically at runtime)  \n`,
+    `**DQ Results Lakehouse:** Governly_Insights (resolved dynamically at runtime)  \n`,
     `**Dimensions:** ${dimensions.join(', ')}  \n`,
     `\n`,
-    `Run all cells in order. Results are written to the dedicated **Governly_DQ** lakehouse:\n`,
+    `Run all cells in order. Results are written to the dedicated **Governly_Insights** lakehouse:\n`,
     `- Delta table \`governly_dq_results\` (partitioned by load_type/year/month/day/run_id)\n`,
     `- Delta table \`governly_dq_failed_rows\` (partitioned by load_type/year/month/day/run_id)\n`,
     `- JSON files in \`Files/governly_dq/year={year}/month={month}/day={day}/run_id={run_id}/\``
@@ -64,7 +64,7 @@ function buildDqNotebook(config) {
     `\n`,
     `WORKSPACE_ID = "${workspaceId}"\n`,
     `\n`,
-    `# Resolve the Governly_DQ lakehouse ID dynamically — no hardcoded IDs\n`,
+    `# Resolve the Governly_Insights lakehouse ID dynamically — no hardcoded IDs\n`,
     `def _resolve_dq_lakehouse_id():\n`,
     `    token = mssparkutils.credentials.getToken("https://api.fabric.microsoft.com")\n`,
     `    r = _fab_req.get(\n`,
@@ -73,12 +73,12 @@ function buildDqNotebook(config) {
     `    )\n`,
     `    r.raise_for_status()\n`,
     `    for lh in r.json().get("value", []):\n`,
-    `        if lh["displayName"] == "Governly_DQ":\n`,
+    `        if lh["displayName"] == "Governly_Insights":\n`,
     `            return lh["id"]\n`,
-    `    raise RuntimeError("[DQ] Governly_DQ lakehouse not found. Create it from the Configure tab first.")\n`,
+    `    raise RuntimeError("[DQ] Governly_Insights lakehouse not found. Create it from the Configure tab first.")\n`,
     `\n`,
     `DQ_LAKEHOUSE_ID = _resolve_dq_lakehouse_id()\n`,
-    `print(f"[DQ] Resolved DQ lakehouse: Governly_DQ ({DQ_LAKEHOUSE_ID})")\n`,
+    `print(f"[DQ] Resolved DQ lakehouse: Governly_Insights ({DQ_LAKEHOUSE_ID})")\n`,
     `\n`,
     `LOAD_TYPE      = "full"\n`,
     `FRESHNESS_DAYS = 7\n`,
@@ -308,7 +308,7 @@ function buildDqNotebook(config) {
     `        _write_path("Tables/governly_dq_results"),\n`,
     `        ["load_type", "year", "month", "day", "run_id"]\n`,
     `    )\n`,
-    `    print(f"[DQ] Written {len(all_results)} rows to Governly_DQ/governly_dq_results")\n`,
+    `    print(f"[DQ] Written {len(all_results)} rows to Governly_Insights/governly_dq_results")\n`,
     `\n`,
     `if all_failed_rows:\n`,
     `    _safe_write_delta(\n`,
@@ -316,7 +316,7 @@ function buildDqNotebook(config) {
     `        _write_path("Tables/governly_dq_failed_rows"),\n`,
     `        ["load_type", "year", "month", "day", "run_id"]\n`,
     `    )\n`,
-    `    print(f"[DQ] Written {len(all_failed_rows)} rows to Governly_DQ/governly_dq_failed_rows")\n`
+    `    print(f"[DQ] Written {len(all_failed_rows)} rows to Governly_Insights/governly_dq_failed_rows")\n`
   ];
 
   const exportJsonLines = [

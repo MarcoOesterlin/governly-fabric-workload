@@ -89,7 +89,7 @@ export const ItemsView: React.FC<ItemsViewProps> = ({
   const [suggesting, setSuggesting] = useState(false);
 
   // Hide internal Governly infrastructure items from the list
-  const HIDDEN_NAMES = useMemo(() => [/^governly[_ ]dq$/i, /^governly data agent$/i], []);
+  const HIDDEN_NAMES = useMemo(() => [/^governly[_ ]dq$/i, /^governly data agent$/i, /^governly_insights$/i], []);
   const visibleItems = useMemo(
     () => items.filter(i => !HIDDEN_NAMES.some(re => re.test(i.displayName?.trim() ?? ''))),
     [items, HIDDEN_NAMES]

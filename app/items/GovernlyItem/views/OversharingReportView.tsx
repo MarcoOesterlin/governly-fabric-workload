@@ -96,14 +96,16 @@ const UsersTable: React.FC<UsersTableProps> = ({ users, revoking, itemId, onRevo
           <tr key={user.identifier} style={{ borderBottom: '1px solid #f0f0f0' }}>
             <td style={{ padding: '6px 10px' }}>
               <div>{user.displayName}</div>
-              <div style={{ fontSize: 11, color: '#888' }}>{user.identifier}</div>
+              <div style={{ fontSize: 11, color: '#888' }}>{user.email ?? user.identifier}</div>
             </td>
             <td style={{ padding: '6px 10px', color: '#555' }}>
               {user.accessRights.join(', ') || '—'}
             </td>
             <td style={{ padding: '6px 10px' }}>
-              {user.isExternal
-                ? <Badge color="danger" appearance="tint">External</Badge>
+              {user.isExternalDomain
+                ? <Badge color="danger"  appearance="tint">External Domain</Badge>
+                : user.isExternal
+                ? <Badge color="warning" appearance="tint">External</Badge>
                 : <span style={{ color: '#aaa', fontSize: 12 }}>Internal</span>}
             </td>
             <td style={{ padding: '6px 10px', color: user.grantedBy ? undefined : '#aaa' }}>
@@ -303,7 +305,11 @@ export const OversharingReportView: React.FC<OversharingReportViewProps> = ({ wo
     }
   }, [client, workspaceId]);
 
-  const items = useMemo(() => report?.items ?? [], [report]);
+  const EXCLUDED_NAMES = ['Governly', 'Governly Data Agent', 'Governly_Insights', 'Governly_DQ', 'Governly DQ'];
+
+  const items = useMemo(() =>
+    (report?.items ?? []).filter(i => !EXCLUDED_NAMES.includes(i.displayName)),
+  [report]);
 
   const summary = useMemo(() => ({
     total:    items.length,

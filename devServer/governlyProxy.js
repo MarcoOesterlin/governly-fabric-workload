@@ -66,6 +66,7 @@ function invalidateClientSecretCache() {
 // No user token or OBO exchange needed — the app has InformationProtectionPolicy.Read.All.
 
 let _graphToken = null; // { token: string, expiresAt: number } | null
+let _m365Token  = null;
 
 async function acquireGraphTokenViaClientCredentials() {
   // Reuse cached token if still valid (with 60s buffer)
@@ -117,6 +118,55 @@ async function acquireGraphTokenViaClientCredentials() {
 
   console.log('[Proxy] Graph app token acquired via client credentials ✓');
   return _graphToken.token;
+}
+
+/**
+ * Acquire an app-only token for the Office 365 Management Activity API.
+ * Requires the service principal to have the `ActivityFeed.Read` application
+ * permission on the "Office 365 Management APIs" resource (manage.office.com).
+ */
+async function acquireM365TokenViaClientCredentials() {
+  if (_m365Token && Date.now() < _m365Token.expiresAt - 60_000) {
+    return _m365Token.token;
+  }
+
+  const clientSecret = await readClientSecretFromKeyVault();
+  const clientId     = process.env.FRONTEND_APPID;
+  const audience     = process.env.AUDIENCE || '';
+  const tenantId     = audience.split('/')[3];
+
+  if (!clientId || !tenantId) {
+    throw new Error('FRONTEND_APPID and AUDIENCE must be set in .env.dev for M365 client credentials token.');
+  }
+
+  const body = new URLSearchParams({
+    grant_type:    'client_credentials',
+    client_id:     clientId,
+    client_secret: clientSecret,
+    scope:         'https://manage.office.com/.default',
+  });
+
+  const bodyStr = body.toString();
+  const response = await httpRequest(
+    `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type':   'application/x-www-form-urlencoded',
+        'Content-Length': String(Buffer.byteLength(bodyStr)),
+      },
+      body: bodyStr,
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`M365 client credentials token failed (${response.status}): ${response.body.slice(0, 400)}`);
+  }
+
+  const data = JSON.parse(response.body);
+  _m365Token = { token: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
+  console.log('[Proxy] M365 Management app token acquired via client credentials ✓');
+  return _m365Token.token;
 }
 
 // ── Azure CLI token cache (Fabric / PowerBI) ──────────────────────────────────
@@ -327,5 +377,8 @@ module.exports = async function governlyProxyMiddleware(req, res, next) {
 
 /** Expose Fabric token acquisition for use by other route registrations. */
 module.exports.acquireFabricToken = () => acquireAzToken(AZ_TOKEN_RESOURCES.fabric);
+module.exports.acquirePowerBIToken = () => acquireAzToken(AZ_TOKEN_RESOURCES.powerbi);
+module.exports.acquireAzToken = acquireAzToken;
 module.exports.acquireGraphTokenViaClientCredentials = acquireGraphTokenViaClientCredentials;
+module.exports.acquireM365TokenViaClientCredentials = acquireM365TokenViaClientCredentials;
 module.exports.invalidateClientSecretCache = invalidateClientSecretCache;
