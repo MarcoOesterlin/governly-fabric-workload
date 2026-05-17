@@ -29,6 +29,10 @@ coverage/
 *.har
 url.txt
 
+# Copilot CLI tooling (skills, session state)
+.agents/
+.superpowers/
+
 # OS
 .DS_Store
 Thumbs.db
