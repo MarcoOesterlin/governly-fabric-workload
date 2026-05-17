@@ -9,16 +9,10 @@ import {
   CheckmarkStarburst24Regular,
   Open24Regular,
   Bot24Regular,
-  Dismiss24Regular,
-  PeopleTeam24Regular,
   DocumentSearch24Regular,
   ChatBubblesQuestion24Regular,
 } from '@fluentui/react-icons';
 import {
-  Button,
-  MessageBar,
-  MessageBarBody,
-  MessageBarActions,
   Spinner,
   Tab,
   TabList,
@@ -31,7 +25,6 @@ import { SpStatusBadge } from './components/SpStatusBadge';
 import { callGetItem } from '../../controller/ItemCRUDController';
 import { ItemsView } from './views/ItemsView';
 import { DataQualityView } from './views/DataQualityView';
-import { AccessManagementView } from './views/AccessManagementView';
 import { OversharingReportView } from './views/OversharingReportView';
 import { ActivityLogsView } from './views/ActivityLogsView';
 
@@ -39,7 +32,7 @@ interface GovernlyItemEditorProps {
   workloadClient: WorkloadClientAPI;
 }
 
-type ViewKey = 'items' | 'data-quality' | 'access' | 'audit' | 'agent-logs';
+type ViewKey = 'items' | 'data-quality' | 'audit' | 'agent-logs';
 
 interface NavItem {
   key: ViewKey;
@@ -51,7 +44,6 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { key: 'items',        labelKey: 'Nav_Items',       defaultLabel: 'Workspace Items', icon: <AppsList24Regular /> },
   { key: 'data-quality', labelKey: 'Nav_DataQuality', defaultLabel: 'Data Quality',   icon: <CheckmarkStarburst24Regular /> },
-  { key: 'access',       labelKey: 'Nav_Access',      defaultLabel: 'Access Management', icon: <PeopleTeam24Regular /> },
   { key: 'audit',        labelKey: 'Nav_Audit',       defaultLabel: 'Oversharing Report', icon: <DocumentSearch24Regular /> },
   { key: 'agent-logs',   labelKey: 'Nav_AgentLogs',   defaultLabel: 'Workspace Activity Logs', icon: <ChatBubblesQuestion24Regular /> },
 ];
@@ -138,7 +130,6 @@ const GovernlyItemEditor: React.FC<GovernlyItemEditorProps> = ({ workloadClient 
   const [dataAgentStatus, setDataAgentStatus] = useState<'checking' | 'idle' | 'provisioning' | 'done' | 'error'>('checking');
   const [dataAgentResult, setDataAgentResult] = useState<DataAgentProvisionResult | undefined>();
   const [dataAgentError, setDataAgentError] = useState<string | undefined>();
-  const [showAgentBanner, setShowAgentBanner] = useState(false);
 
   useEffect(() => {
     if (!workspaceId) return;
@@ -148,7 +139,6 @@ const GovernlyItemEditor: React.FC<GovernlyItemEditorProps> = ({ workloadClient 
         if (status.exists) {
           setDataAgentResult({ agentId: status.agentId, agentName: status.agentName, message: `${status.agentName ?? 'Data Agent'} is active` });
           setDataAgentStatus('done');
-          setShowAgentBanner(true);
         } else {
           setDataAgentStatus('idle');
         }
@@ -205,32 +195,16 @@ const GovernlyItemEditor: React.FC<GovernlyItemEditorProps> = ({ workloadClient 
     setDataAgentError(undefined);
     setDataAgentResult(undefined);
     apiClient.provisionDataAgent(workspaceId, 'Governly')
-      .then(result => { setDataAgentResult(result); setDataAgentStatus('done'); setShowAgentBanner(true); })
-      .catch((err: any) => { setDataAgentError(err?.message ?? String(err)); setDataAgentStatus('error'); setShowAgentBanner(true); });
+      .then(result => { setDataAgentResult(result); setDataAgentStatus('done'); })
+      .catch((err: any) => { setDataAgentError(err?.message ?? String(err)); setDataAgentStatus('error'); });
   }, [apiClient, workspaceId, dataAgentStatus]);
 
-  // Auto-dismiss success banner after 4 seconds (status stays 'done' so button stays correct)
-  useEffect(() => {
-    if (!showAgentBanner || dataAgentStatus !== 'done') return undefined;
-    const timer = setTimeout(() => setShowAgentBanner(false), 4000);
-    return () => clearTimeout(timer);
-  }, [showAgentBanner, dataAgentStatus]);
+  // Auto-dismiss success banner after 4 seconds (kept for future use)
 
   const handleOpenWorkspace = useCallback(() => {
     if (!workspaceId) return;
     workloadClient.navigation.navigate('host', { path: `/groups/${workspaceId}` })
       .catch(() => workloadClient.navigation.openBrowserTab({ url: `https://app.fabric.microsoft.com/groups/${workspaceId}` }).catch(console.error));
-  }, [workloadClient, workspaceId]);
-
-  const handleOpenAgentWorkspace = useCallback(async () => {
-    if (!workspaceId) return;
-    try {
-      await workloadClient.navigation.navigate('host', { path: '/' });
-      await new Promise(r => setTimeout(r, 300));
-      await workloadClient.navigation.navigate('host', { path: `/groups/${workspaceId}` });
-    } catch {
-      workloadClient.navigation.navigate('host', { path: `/groups/${workspaceId}` }).catch(console.error);
-    }
   }, [workloadClient, workspaceId]);
 
   const agentBusy = dataAgentStatus === 'provisioning' || dataAgentStatus === 'checking';
@@ -268,10 +242,8 @@ const GovernlyItemEditor: React.FC<GovernlyItemEditorProps> = ({ workloadClient 
         );
       case 'data-quality':
         return <DataQualityView apiClient={apiClient} workspaceId={workspaceId ?? ''} workloadClient={workloadClient} refreshTrigger={refreshTrigger} />;
-      case 'access':
-        return <AccessManagementView workspaceId={workspaceId ?? ''} client={apiClient} />;
       case 'audit':
-        return <OversharingReportView workspaceId={workspaceId} client={apiClient} />;
+        return <OversharingReportView workspaceId={workspaceId} client={apiClient} labels={labels} />;
       case 'agent-logs':
         return <ActivityLogsView workspaceId={workspaceId ?? ''} client={apiClient} />;
       default:
@@ -346,28 +318,6 @@ const GovernlyItemEditor: React.FC<GovernlyItemEditorProps> = ({ workloadClient 
           {t('Classifier_Ribbon_Refresh', 'Refresh')}
         </button>
       </div>
-
-      {/* ── Data Agent notification banner ── */}
-      {showAgentBanner && (dataAgentStatus === 'done' || dataAgentStatus === 'error') && (
-        <MessageBar intent={dataAgentStatus === 'done' ? 'success' : 'error'}>
-          <MessageBarBody>
-            {dataAgentStatus === 'done'
-              ? dataAgentResult?.message ?? 'Data Agent is active'
-              : `Data Agent provisioning failed: ${dataAgentError}`}
-          </MessageBarBody>
-          <MessageBarActions
-            containerAction={
-              <Button appearance="transparent" size="small" icon={<Dismiss24Regular />} aria-label="Dismiss" onClick={() => setShowAgentBanner(false)} />
-            }
-          >
-            {dataAgentStatus === 'done' && dataAgentResult?.agentId && workspaceId && (
-              <Button appearance="transparent" size="small" onClick={handleOpenAgentWorkspace}>
-                Open Workspace
-              </Button>
-            )}
-          </MessageBarActions>
-        </MessageBar>
-      )}
 
       {/* ── Body (sidebar + content) ── */}
       <div className={styles.body}>

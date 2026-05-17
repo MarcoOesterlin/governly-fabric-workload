@@ -123,6 +123,9 @@ export interface ItemUser {
   accessRights: string[];
   isExternal: boolean;
   isExternalDomain: boolean;
+  isGroup: boolean;
+  isOrgWide: boolean;
+  viaGroup: string | null;
   grantedBy: string | null;
   grantedAt: string | null;
 }

@@ -18,11 +18,13 @@ import {
   OversharingReport,
   OversharingItem,
   ItemUser,
+  SensitivityLabel,
 } from '../../../clients/GovernlyApiClient';
 
 interface OversharingReportViewProps {
   workspaceId: string;
   client: GovernlyApiClient;
+  labels?: SensitivityLabel[];
 }
 
 // ── Small reusable chips ──────────────────────────────────────────────────────
@@ -96,16 +98,29 @@ const UsersTable: React.FC<UsersTableProps> = ({ users, revoking, itemId, onRevo
           <tr key={user.identifier} style={{ borderBottom: '1px solid #f0f0f0' }}>
             <td style={{ padding: '6px 10px' }}>
               <div>{user.displayName}</div>
-              <div style={{ fontSize: 11, color: '#888' }}>{user.email ?? user.identifier}</div>
+              <div style={{ fontSize: 11, color: '#888' }}>
+                {user.isGroup
+                  ? user.identifier
+                  : (user.email ?? user.identifier)}
+              </div>
+              {user.viaGroup && (
+                <div style={{ fontSize: 11, color: '#888', fontStyle: 'italic' }}>
+                  via {user.viaGroup}
+                </div>
+              )}
             </td>
             <td style={{ padding: '6px 10px', color: '#555' }}>
               {user.accessRights.join(', ') || '—'}
             </td>
             <td style={{ padding: '6px 10px' }}>
-              {user.isExternalDomain
+              {user.isOrgWide
+                ? <Badge color="severe" appearance="tint">🌍 Org-Wide</Badge>
+                : user.isGroup
+                ? <Badge color="informative" appearance="tint">AD Group</Badge>
+                : user.isExternalDomain
                 ? <Badge color="danger"  appearance="tint">External Domain</Badge>
                 : user.isExternal
-                ? <Badge color="warning" appearance="tint">External</Badge>
+                ? <Badge color="warning" appearance="tint">External Workspace</Badge>
                 : <span style={{ color: '#aaa', fontSize: 12 }}>Internal</span>}
             </td>
             <td style={{ padding: '6px 10px', color: user.grantedBy ? undefined : '#aaa' }}>
@@ -138,11 +153,12 @@ interface ItemCardProps {
   item: OversharingItem;
   expanded: boolean;
   revoking: Set<string>;
+  labels: SensitivityLabel[];
   onToggle: (id: string) => void;
   onRevoke: (itemId: string, identifier: string) => void;
 }
 
-const ItemCard: React.FC<ItemCardProps> = ({ item, expanded, revoking, onToggle, onRevoke }) => {
+const ItemCard: React.FC<ItemCardProps> = ({ item, expanded, revoking, labels, onToggle, onRevoke }) => {
   const { flags } = item;
   const hasUsers = item.users.length > 0;
 
@@ -165,12 +181,18 @@ const ItemCard: React.FC<ItemCardProps> = ({ item, expanded, revoking, onToggle,
         <Text weight="semibold" style={{ flex: 1, minWidth: 0 }}>{item.displayName}</Text>
 
         {/* Sensitivity label */}
-        {item.labelName
-          ? <span style={{ fontSize: 12, color: '#1e6b33' }}>🏷 {item.labelName}</span>
-          : <span style={{ fontSize: 12, color: '#aaa', fontStyle: 'italic' }}>No label</span>}
+        {(() => {
+          const resolvedLabel = item.labelId
+            ? labels.find(l => l.id?.toLowerCase() === item.labelId?.toLowerCase())
+            : null;
+          const name = resolvedLabel?.name ?? item.labelName ?? null;
+          return name
+            ? <span style={{ fontSize: 12, color: '#1e6b33' }}>🏷 {name}</span>
+            : <span style={{ fontSize: 12, color: '#aaa', fontStyle: 'italic' }}>No label</span>;
+        })()}
 
         {/* Oversharing flags */}
-        {flags.hasExternalUsers    && <FlagChip label="🔴 External"   color="#c50f1f" bg="#fde8e8" />}
+        {flags.hasExternalUsers    && <FlagChip label="🔴 External Domain"   color="#c50f1f" bg="#fde8e8" />}
         {flags.unlabeledWithGrants && <FlagChip label="🟡 Unlabeled"  color="#c25600" bg="#fff3e0" />}
         {flags.highAccessCount     && <FlagChip label="🟠 High count" color="#b45309" bg="#fef3c7" />}
         {flags.hasDirectGrants && !flags.hasExternalUsers && !flags.unlabeledWithGrants && !flags.highAccessCount
@@ -239,7 +261,7 @@ const SummaryCard: React.FC<SummaryCardProps> = ({ label, count, filterKey, acti
 
 // ── Main view ─────────────────────────────────────────────────────────────────
 
-export const OversharingReportView: React.FC<OversharingReportViewProps> = ({ workspaceId, client }) => {
+export const OversharingReportView: React.FC<OversharingReportViewProps> = ({ workspaceId, client, labels = [] }) => {
   const [report, setReport] = useState<OversharingReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -363,7 +385,7 @@ export const OversharingReportView: React.FC<OversharingReportViewProps> = ({ wo
       {/* Summary filter bar */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
         <SummaryCard label="All Items"       count={summary.total}     filterKey="all"       active={filter === 'all'}       color="#555"    onClick={setFilter} />
-        <SummaryCard label="External Users"  count={summary.external}  filterKey="external"  active={filter === 'external'}  color="#c50f1f" onClick={setFilter} />
+        <SummaryCard label="External Domain"  count={summary.external}  filterKey="external"  active={filter === 'external'}  color="#c50f1f" onClick={setFilter} />
         <SummaryCard label="Unlabeled+Shared"count={summary.unlabeled} filterKey="unlabeled" active={filter === 'unlabeled'} color="#c25600" onClick={setFilter} />
         <SummaryCard label=">10 Users"       count={summary.high}      filterKey="high"      active={filter === 'high'}      color="#b45309" onClick={setFilter} />
         <SummaryCard label="Any Direct Grant"count={summary.direct}    filterKey="direct"    active={filter === 'direct'}    color="#0f52ba" onClick={setFilter} />
@@ -396,6 +418,7 @@ export const OversharingReportView: React.FC<OversharingReportViewProps> = ({ wo
             item={item}
             expanded={expanded.has(item.id)}
             revoking={revoking}
+            labels={labels}
             onToggle={handleToggle}
             onRevoke={handleRevoke}
           />

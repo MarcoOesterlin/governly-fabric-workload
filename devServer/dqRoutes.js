@@ -661,12 +661,12 @@ function registerDqRoutes(app) {
     // Run in background — do not await
     (async () => {
       try {
-        const { queryDataAgentActivity } = require('./purviewLogs');
+        const { queryGraphAllWorkspaceActivity } = require('./purviewLogs');
         const fabricToken = getFabricToken();
         const insightsLakehouseId = await ensureDqLakehouse(workspaceId, fabricToken);
 
         console.log(`[ActivityLogs] Querying Graph Audit Log for workspaceId=${workspaceId} days=${days}…`);
-        const result = await queryDataAgentActivity(workspaceId, days);
+        const result = await queryGraphAllWorkspaceActivity(workspaceId, days);
         const allEntries = result.entries;
         allEntries.sort((a, b) => (b.createdDateTime ?? '').localeCompare(a.createdDateTime ?? ''));
 
