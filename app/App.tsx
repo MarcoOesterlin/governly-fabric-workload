@@ -3,7 +3,6 @@ import { Route, Router, Switch } from "react-router-dom";
 import { History } from "history";
 import { WorkloadClientAPI } from "@ms-fabric/workload-client";
 import { GovernlyItemEditor } from "./items/GovernlyItem";
-import { ConditionalPlaygroundRoutes } from "./playground/ConditionalPlaygroundRoutes";
 
 class ErrorBoundary extends React.Component<
     { children: React.ReactNode },
@@ -70,9 +69,6 @@ export function App({ history, workloadClient }: AppProps) {
             <Route path="/ClassifierItem-editor/:itemObjectId">
                 <GovernlyItemEditor workloadClient={workloadClient} />
             </Route>
-
-            {/* Conditionally loaded playground routes (only in development) */}
-            <ConditionalPlaygroundRoutes workloadClient={workloadClient} />
 
             {/* Catch-all: shows current path for debugging unmatched routes */}
             <Route>

@@ -25,6 +25,10 @@ coverage/
 # Worktrees
 .worktrees/
 
+# Dev artifacts
+*.har
+url.txt
+
 # OS
 .DS_Store
 Thumbs.db

@@ -8,7 +8,23 @@ const FABRIC_BASE = 'https://api.fabric.microsoft.com/v1';
 const GRAPH_BASE  = 'https://graph.microsoft.com/v1.0';
 const HIGH_ACCESS_THRESHOLD = 10;
 
+// Gate verbose diagnostic logs behind DEBUG_OVERSHARING=1.
+// Errors/warnings still log unconditionally via console.warn/error.
+const DEBUG = process.env.DEBUG_OVERSHARING === '1' || process.env.DEBUG_OVERSHARING === 'true';
+const debug = (...args) => { if (DEBUG) debug(...args); };
+
+// Bounded cache for group display names.
+// Simple Map + insertion-order eviction at MAX entries to prevent unbounded growth
+// in long-running dev servers / enterprise tenants with many groups.
+const GROUP_CACHE_MAX = 1000;
 const _groupNameCache = new Map();
+function cacheGroupName(id, name) {
+  if (_groupNameCache.size >= GROUP_CACHE_MAX) {
+    const oldest = _groupNameCache.keys().next().value;
+    if (oldest !== undefined) _groupNameCache.delete(oldest);
+  }
+  _groupNameCache.set(id, name);
+}
 
 async function resolveGroupDisplayName(groupId) {
   if (_groupNameCache.has(groupId)) return _groupNameCache.get(groupId);
@@ -16,10 +32,10 @@ async function resolveGroupDisplayName(groupId) {
     const token = await acquireGraphTokenViaClientCredentials();
     const result = await jsonRequest(`${GRAPH_BASE}/groups/${encodeURIComponent(groupId)}?$select=displayName`, { token });
     const name = result.ok ? (result.data.displayName ?? null) : null;
-    _groupNameCache.set(groupId, name);
+    cacheGroupName(groupId, name);
     return name;
   } catch {
-    _groupNameCache.set(groupId, null);
+    cacheGroupName(groupId, null);
     return null;
   }
 }
@@ -68,7 +84,7 @@ async function getAllItems(workspaceId) {
       // Fabric items API returns sensitivityLabel.labelId (not sensitivityLabelId)
       item._labelId = (item.sensitivityLabel?.labelId ?? item.sensitivityLabel?.sensitivityLabelId)?.toLowerCase() ?? null;
       if (item.sensitivityLabel !== undefined || item._labelId) {
-        console.log(`[Oversharing] Item "${item.displayName}" sensitivityLabel:`, JSON.stringify(item.sensitivityLabel), '→ _labelId:', item._labelId);
+        debug(`[Oversharing] Item "${item.displayName}" sensitivityLabel:`, JSON.stringify(item.sensitivityLabel), '→ _labelId:', item._labelId);
       }
       items.push(item);
     }
@@ -96,7 +112,7 @@ async function fetchLabelNameMap() {
     for (const l of result.data.value ?? []) {
       if (l.id) map.set(l.id.toLowerCase(), l.name ?? l.displayName ?? null);
     }
-    console.log(`[Oversharing] fetchLabelNameMap: ${map.size} labels loaded`, [...map.entries()]);
+    debug(`[Oversharing] fetchLabelNameMap: ${map.size} labels loaded`, [...map.entries()]);
     return map;
   } catch (err) {
     console.warn('[Oversharing] fetchLabelNameMap failed:', err.message);
@@ -118,7 +134,7 @@ async function getFabricItemUsers(workspaceId, itemId, itemType) {
     return [];
   }
   const users = result.data.value ?? [];
-  console.log(`[Oversharing] getFabricItemUsers(${itemId}, type=${itemType}) → ${users.length} user(s)`);
+  debug(`[Oversharing] getFabricItemUsers(${itemId}, type=${itemType}) → ${users.length} user(s)`);
   return users;
 }
 
@@ -170,14 +186,14 @@ async function getPowerBIItemUsers(workspaceId, itemId, itemType) {
       console.warn(`[Oversharing] getPowerBIItemUsers admin(${itemId}, type=${itemType}) → ${result?.status}:`, JSON.stringify(result?.data).slice(0, 200));
       return [];
     }
-    console.log(`[Oversharing] getPowerBIItemUsers admin(${itemId}, type=${itemType}) → success`);
+    debug(`[Oversharing] getPowerBIItemUsers admin(${itemId}, type=${itemType}) → success`);
   }
 
   try {
     const rawUsers = result.data.value ?? [];
     // Filter out workspace members with inherited "None" access — they have no explicit grant
     const explicitUsers = rawUsers.filter(u => u[accessField] && u[accessField] !== 'None');
-    console.log(`[Oversharing] getPowerBIItemUsers(${itemId}, type=${itemType}) → ${rawUsers.length} total, ${explicitUsers.length} with explicit access`);
+    debug(`[Oversharing] getPowerBIItemUsers(${itemId}, type=${itemType}) → ${rawUsers.length} total, ${explicitUsers.length} with explicit access`);
     return explicitUsers.map(u => ({
       identifier:        u.identifier ?? u.emailAddress,
       displayName:       u.displayName ?? u.identifier,
@@ -252,7 +268,7 @@ async function getWorkspaceGroupsAndMembers(workspaceId) {
     }
     const expanded = await Promise.all(groups.map(async g => {
       const members = await fetchGroupMembers(g.groupId);
-      console.log(`[Oversharing] Workspace group "${g.groupName}" (${g.role}): ${members.length} member(s)`);
+      debug(`[Oversharing] Workspace group "${g.groupName}" (${g.role}): ${members.length} member(s)`);
       return { ...g, members };
     }));
     return expanded;
@@ -451,7 +467,7 @@ async function getOneLakeMembers(workspaceId) {
         }
       }
       if (members.length > 0) {
-        console.log(`[Oversharing] OneLake members for ${lh.displayName}: ${members.length}`);
+        debug(`[Oversharing] OneLake members for ${lh.displayName}: ${members.length}`);
         map.set(lh.id, members);
       }
     }
@@ -681,6 +697,29 @@ async function processItem(raw, workspaceId, grantorMap, workspaceMemberIds, lab
   }
 }
 
+/**
+ * Run an async mapper over items with bounded concurrency.
+ * Prevents unbounded fan-out (e.g. 500-item workspaces hitting Graph API limits).
+ * @template T, R
+ * @param {T[]} items
+ * @param {number} limit
+ * @param {(item: T, index: number) => Promise<R>} mapper
+ * @returns {Promise<R[]>}
+ */
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  async function worker() {
+    while (nextIndex < items.length) {
+      const i = nextIndex++;
+      results[i] = await mapper(items[i], i);
+    }
+  }
+  const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
+
 async function buildOversharingReport(workspaceId) {
   const grantorTimeout = new Promise(resolve =>
     setTimeout(() => resolve(new Map()), 8_000)
@@ -695,7 +734,11 @@ async function buildOversharingReport(workspaceId) {
     getWorkspaceGroupsAndMembers(workspaceId),
   ]);
 
-  const items = await Promise.all(rawItems.map(raw => processItem(raw, workspaceId, grantorMap, workspaceMemberIds, labelNameMap, oneLakeMap, workspaceGroups)));
+  // Cap concurrency at 5 to avoid overwhelming Fabric/PowerBI/Graph APIs
+  // when scanning large enterprise workspaces (hundreds of items).
+  const items = await mapWithConcurrency(rawItems, 5, raw =>
+    processItem(raw, workspaceId, grantorMap, workspaceMemberIds, labelNameMap, oneLakeMap, workspaceGroups)
+  );
 
   return { items, generatedAt: new Date().toISOString() };
 }

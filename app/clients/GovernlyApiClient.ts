@@ -1,5 +1,4 @@
 import { WorkloadClientAPI } from '@ms-fabric/workload-client';
-import type { WorkspaceRole } from './FabricPlatformTypes';
 import type { TableColumn, DqRunConfig, DqRunMeta, DqRunSummary, DqFailedRow, DqPreloadResult } from '../items/GovernlyItem/views/dataQuality/dqTypes';
 
 // Fabric constructs are batch-limited to 2,000 items per request.
@@ -145,84 +144,6 @@ export interface OversharingReport {
   generatedAt: string;
 }
 
-export interface GroupMember {
-  id: string;
-  displayName: string;
-  email?: string;
-  addedAt: string | null;   // ISO-8601 or null if audit log unavailable
-  groupId: string;
-}
-
-export interface AccessPrincipal {
-  id: string;
-  displayName: string;
-  type: 'User' | 'Group' | 'ServicePrincipal';
-  email?: string;
-}
-
-export interface AccessRoleAssignment {
-  id: string;
-  role: WorkspaceRole;
-  principal: AccessPrincipal;
-  members?: GroupMember[];   // only present when principal.type === 'Group'
-}
-
-export interface OneLakeEntraMember {
-  objectId: string;
-  displayName: string;
-  email: string | null;
-  type: 'User' | 'Group' | 'ServicePrincipal';
-}
-
-export interface OneLakeFabricItemMember {
-  sourcePath: string;
-  itemAccess: string[];
-  resolvedItem: string;
-  resolvedWorkspace: string | null;
-  expandedUsers: Array<{
-    id: string;
-    displayName: string;
-    email: string | null;
-    principalType: string;
-  }>;
-}
-
-export interface OneLakeRole {
-  name: string;
-  permissions: string[];
-  entraMembers: OneLakeEntraMember[];
-  fabricItemMembers: OneLakeFabricItemMember[];
-}
-
-export interface OneLakeLakehouse {
-  id: string;
-  name: string;
-  roles: OneLakeRole[];
-}
-
-export interface DirectItemShareUser {
-  id: string;
-  displayName: string;
-  email: string | null;
-  identifier: string | null;
-  principalType: string;
-  accessRight: string;
-  isExternal: boolean;
-}
-
-export interface DirectItemShare {
-  itemId: string;
-  itemName: string;
-  itemType: string;
-  users: DirectItemShareUser[];
-}
-
-export interface WorkspaceAccessReport {
-  assignments: AccessRoleAssignment[];
-  oneLakeSecurity?: OneLakeLakehouse[];
-  directItemShares?: DirectItemShare[];
-}
-
 export interface AuditRecord {
   id: string;
   createdDateTime: string;     // ISO-8601
@@ -248,23 +169,6 @@ export interface FabricAuditReport {
   records: AuditRecord[];
   queryDays: number;
   partial: boolean;          // true if AuditLog.Read.All not consented or timed out
-  error?: string;
-}
-
-export interface DataAgentLogEntry extends AuditRecord {
-  agentId: string;
-  agentName: string;
-  prompt?: string;
-  completion?: string;
-  tokenCount?: number;
-  duration?: number;
-  raw?: Record<string, unknown>;
-}
-
-export interface DataAgentLogsReport {
-  entries: DataAgentLogEntry[];
-  queryDays: number;
-  partial: boolean;
   error?: string;
 }
 
@@ -645,32 +549,6 @@ export class GovernlyApiClient {
     return resp.json();
   }
 
-  // ── Access Management ────────────────────────────────────────────────────
-
-  async getWorkspaceAccess(workspaceId: string): Promise<WorkspaceAccessReport> {
-    const qs = new URLSearchParams({ workspaceId });
-    const resp = await fetch(`/api/access/roles?${qs}`);
-    if (!resp.ok) throw new Error(`getWorkspaceAccess failed (${resp.status}): ${await resp.text()}`);
-    return resp.json() as Promise<WorkspaceAccessReport>;
-  }
-
-  async revokeGroupMember(groupId: string, memberId: string): Promise<void> {
-    const qs = new URLSearchParams({ groupId, memberId });
-    const resp = await fetch(`/api/access/group-member?${qs}`, { method: 'DELETE' });
-    if (!resp.ok) throw new Error(`revokeGroupMember failed (${resp.status}): ${await resp.text()}`);
-  }
-
-  async getAuditLogRetentionDays(): Promise<number | null> {
-    try {
-      const resp = await fetch('/api/access/audit-retention');
-      if (!resp.ok) return null;
-      const data = await resp.json() as { days: number | null };
-      return data.days ?? null;
-    } catch {
-      return null;
-    }
-  }
-
   async getOversharingReport(workspaceId: string): Promise<OversharingReport> {
     const resp = await fetch(`/api/oversharing/report?workspaceId=${encodeURIComponent(workspaceId)}`);
     if (!resp.ok) throw new Error(`getOversharingReport failed (${resp.status}): ${await resp.text()}`);
@@ -691,20 +569,6 @@ export class GovernlyApiClient {
     const resp = await fetch(`/api/audit/fabric-activity?${qs}`);
     if (!resp.ok) throw new Error(`getFabricAuditLogs failed (${resp.status}): ${await resp.text()}`);
     return resp.json() as Promise<FabricAuditReport>;
-  }
-
-  async getDataAgentLogs(workspaceId: string, days = 30): Promise<DataAgentLogsReport> {
-    const qs = new URLSearchParams({ workspaceId, days: String(days) });
-    const resp = await fetch(`/api/audit/data-agent-logs?${qs}`);
-    if (!resp.ok) throw new Error(`getDataAgentLogs failed (${resp.status}): ${await resp.text()}`);
-    return resp.json() as Promise<DataAgentLogsReport>;
-  }
-
-  async getWorkspaceActivity(workspaceId: string, days = 30): Promise<WorkspaceActivityReport> {
-    const qs = new URLSearchParams({ workspaceId, days: String(days) });
-    const resp = await fetch(`/api/audit/workspace-activity?${qs}`);
-    if (!resp.ok) throw new Error(`getWorkspaceActivity failed (${resp.status}): ${await resp.text()}`);
-    return resp.json() as Promise<WorkspaceActivityReport>;
   }
 
   async getCachedActivityLogs(workspaceId: string): Promise<WorkspaceActivityReport> {

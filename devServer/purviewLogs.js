@@ -7,16 +7,12 @@
  * (POST query → poll until succeeded → paginate records).
  * Exports:
  *   queryGraphAllWorkspaceActivity(workspaceId, days?) → { entries, queryDays, partial }
- *   queryDataAgentActivity(workspaceId, days?)         → { entries, queryDays, partial }
- *   queryWorkspaceActivity(workspaceId, days?)         → { entries, queryDays, partial }
  */
 
 const https = require('https');
-const { acquireGraphTokenViaClientCredentials, acquireFabricToken } = require('./governlyProxy');
+const { acquireGraphTokenViaClientCredentials } = require('./governlyProxy');
 
-const GRAPH_BASE      = 'https://graph.microsoft.com/v1.0';
 const GRAPH_BASE_BETA = 'https://graph.microsoft.com/beta';
-const FABRIC_BASE = 'https://api.fabric.microsoft.com/v1';
 
 /**
  * Minimal JSON-over-HTTPS helper.
@@ -107,24 +103,6 @@ async function getAuditRecords(token, queryId) {
     url = result.data['@odata.nextLink'] ?? null;
   }
   return records;
-}
-
-/**
- * Fetch all data agents from the Fabric API for a workspace.
- * Returns [] on any error (graceful degradation).
- */
-async function listDataAgents(workspaceId) {
-  try {
-    const token = acquireFabricToken(); // synchronous
-    const result = await jsonRequest(
-      `${FABRIC_BASE}/workspaces/${encodeURIComponent(workspaceId)}/dataAgents`,
-      { token }
-    );
-    return result.ok ? (result.data.value ?? []) : [];
-  } catch (e) {
-    console.warn('[PurviewLogs] listDataAgents failed:', e.message);
-    return [];
-  }
 }
 
 /**
@@ -221,188 +199,5 @@ async function queryGraphAllWorkspaceActivity(workspaceId, days = 30) {
     return { entries: [], queryDays: days, partial: true, error: err.message };
   }
 }
+module.exports = { queryGraphAllWorkspaceActivity };
 
-/**
- * Query Fabric Admin Activity Events for data agent usage events in a workspace.
- * Uses the Fabric REST API (/admin/activityEvents) — no Graph audit log required.
- * Fabric limits each request to a 24-hour window; we loop over the requested days.
- * @param {string} workspaceId
- * @param {number} days
- * @returns {Promise<{ entries: object[]; queryDays: number; partial: boolean }>}
- */
-async function queryDataAgentActivity(workspaceId, days = 7) {
-  try {
-    const token = acquireFabricToken();
-
-    const [agents] = await Promise.all([listDataAgents(workspaceId)]);
-    const agentIds  = new Set(agents.filter(a => a.id).map(a => a.id.toLowerCase()));
-    const agentById = Object.fromEntries(
-      agents.filter(a => a.id).map(a => [a.id.toLowerCase(), a.displayName])
-    );
-
-    // Fabric activity events API supports max 1-day window per request
-    const endDate   = new Date();
-    const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-    const allEvents = [];
-    let partial     = false;
-
-    let cursor = new Date(startDate);
-    while (cursor < endDate) {
-      const chunkEnd = new Date(Math.min(cursor.getTime() + 24 * 60 * 60 * 1000, endDate.getTime()));
-      // Fabric requires single-quoted ISO strings in the query string
-      const startStr = cursor.toISOString();
-      const endStr   = chunkEnd.toISOString();
-
-      let url = `${FABRIC_BASE}/admin/activityEvents?startDateTime='${startStr}'&endDateTime='${endStr}'`;
-      let chunkOk = true;
-      while (url) {
-        const result = await jsonRequest(url, { token });
-        if (!result.ok) {
-          console.warn(`[DataAgentLogs] activityEvents ${startStr} unavailable (${result.status}) — falling back to Graph Audit Log`);
-          chunkOk = false;
-          // 403/404 = admin permissions not available; Graph Audit Log is the fallback
-          break;
-        }
-        const chunk = result.data.activityEventEntities ?? [];
-        allEvents.push(...chunk);
-        url = result.data.continuationUri ?? null;
-      }
-      if (!chunkOk) break;
-      cursor = chunkEnd;
-    }
-
-    // Debug: log all unique operations returned
-    const ops = [...new Set(allEvents.map(e => e.Activity ?? e.Operation ?? '(none)'))].sort();
-    console.log(`[DataAgentLogs] ${allEvents.length} total events from API. Operations:`, ops);
-
-    const entries = allEvents
-      .filter(e => {
-        const wsId = (e.WorkspaceId ?? '').toLowerCase();
-        const wsMatch = !workspaceId || !wsId || wsId === workspaceId.toLowerCase();
-        if (!wsMatch) return false;
-        const op = (e.Activity ?? e.Operation ?? '').toLowerCase();
-        const isAgentKind        = (e.ArtifactKind ?? '').toLowerCase() === 'dataagent';
-        const isKnownAgent       = e.ArtifactId && agentIds.has(e.ArtifactId.toLowerCase());
-        const isCopilotInteraction = op === 'copilotinteraction';
-        return isAgentKind || isKnownAgent || isCopilotInteraction;
-      })
-      .map(e => {
-        const agentId = (e.ArtifactId ?? e.AgentId ?? '');
-        // CopilotEventData may be a JSON string — parse it if so
-        let copilotEventData = e.CopilotEventData ?? null;
-        if (typeof copilotEventData === 'string') {
-          try { copilotEventData = JSON.parse(copilotEventData); } catch {}
-        }
-        const raw = { ...e, auditData: { ...e, CopilotEventData: copilotEventData } };
-        return {
-          id               : e.Id ?? `${e.CreationTime}-${agentId}`,
-          createdDateTime  : e.CreationTime ?? '',
-          userId           : e.UserId ?? '',
-          userPrincipalName: e.UserPrincipalName ?? e.UserId ?? '',
-          workspaceId      : e.WorkspaceId ?? workspaceId,
-          workspaceName    : e.WorkSpaceName ?? '',
-          operationName    : e.Activity ?? e.Operation ?? '',
-          itemId           : agentId,
-          itemName         : e.ArtifactName ?? '',
-          itemType         : e.ArtifactKind ?? '',
-          clientIP         : e.ClientIP ?? '',
-          result           : e.IsSuccess === true ? 'Succeeded' : e.IsSuccess === false ? 'Failed' : '',
-          service          : e.Workload ?? '',
-          agentId,
-          agentName        : agentById[agentId.toLowerCase()] ?? e.AgentName ?? e.ArtifactName ?? '',
-          prompt           : '',
-          completion       : '',
-          tokenCount       : undefined,
-          duration         : undefined,
-          raw,
-        };
-      });
-
-    // Also pull ALL workspace events from the Microsoft Graph Security Audit Log API
-    const graphResult = await queryGraphAllWorkspaceActivity(workspaceId, days);
-
-    // Merge + deduplicate by id (Fabric entries take precedence)
-    const seen = new Set(entries.map(e => e.id));
-    const merged = [...entries, ...graphResult.entries.filter(e => !seen.has(e.id))];
-    merged.sort((a, b) => b.createdDateTime.localeCompare(a.createdDateTime));
-
-    return { entries: merged, queryDays: days, partial: graphResult.partial };
-  } catch (err) {
-    console.error('[PurviewLogs] queryDataAgentActivity error:', err.message);
-    return { entries: [], queryDays: days, partial: true, error: err.message };
-  }
-}
-
-/**
- * Query Fabric Admin Activity Events for all workspace activity.
- * Uses the Fabric REST API (/admin/activityEvents) — no Graph audit log required.
- * @param {string} workspaceId
- * @param {number} days  Look-back window (max 30 for Fabric Activity Events API)
- * @returns {Promise<{ entries: object[]; queryDays: number; partial: boolean }>}
- */
-async function queryWorkspaceActivity(workspaceId, days = 30) {
-  try {
-    const token     = acquireFabricToken();
-    const endDate   = new Date();
-    const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-    const allEvents = [];
-    let partial     = false;
-
-    let cursor = new Date(startDate);
-    while (cursor < endDate) {
-      const chunkEnd = new Date(Math.min(cursor.getTime() + 24 * 60 * 60 * 1000, endDate.getTime()));
-      const startStr = cursor.toISOString();
-      const endStr   = chunkEnd.toISOString();
-
-      let url = `${FABRIC_BASE}/admin/activityEvents?startDateTime='${startStr}'&endDateTime='${endStr}'`;
-      let chunkOk = true;
-      while (url) {
-        const result = await jsonRequest(url, { token });
-        if (!result.ok) {
-          console.warn(`[WorkspaceActivity] activityEvents ${startStr} failed (${result.status}):`, JSON.stringify(result.data).slice(0, 200));
-          partial = true;
-          chunkOk = false;
-          if (result.status === 403) {
-            return { entries: [], queryDays: days, partial: true, error: 'Fabric tenant admin permissions required for the Activity Events API' };
-          }
-          break;
-        }
-        const chunk = result.data.activityEventEntities ?? [];
-        // Filter to the requested workspace
-        const wsChunk = workspaceId
-          ? chunk.filter(e => (e.WorkspaceId ?? '').toLowerCase() === workspaceId.toLowerCase())
-          : chunk;
-        allEvents.push(...wsChunk);
-        url = result.data.continuationUri ?? null;
-      }
-      if (!chunkOk) break;
-      cursor = chunkEnd;
-    }
-
-    console.log(`[WorkspaceActivity] ${allEvents.length} events for workspace ${workspaceId} over ${days} days`);
-
-    const entries = allEvents.map(e => ({
-      id               : e.Id ?? `${e.CreationTime}-${e.Operation ?? e.Activity ?? ''}`,
-      createdDateTime  : e.CreationTime ?? '',
-      userId           : e.UserId ?? '',
-      userPrincipalName: e.UserPrincipalName ?? e.UserId ?? '',
-      workspaceId      : e.WorkspaceId ?? workspaceId,
-      workspaceName    : e.WorkSpaceName ?? '',
-      operationName    : e.Activity ?? e.Operation ?? '',
-      itemId           : e.ArtifactId ?? e.ItemId ?? '',
-      itemName         : e.ArtifactName ?? e.ItemName ?? '',
-      itemType         : e.ArtifactKind ?? e.ItemKind ?? '',
-      clientIP         : e.ClientIP ?? '',
-      result           : e.IsSuccess === true ? 'Succeeded' : e.IsSuccess === false ? 'Failed' : '',
-      service          : e.Workload ?? '',
-      raw              : e,
-    }));
-
-    return { entries, queryDays: days, partial };
-  } catch (err) {
-    console.error('[PurviewLogs] queryWorkspaceActivity error:', err.message);
-    return { entries: [], queryDays: days, partial: true, error: err.message };
-  }
-}
-
-module.exports = { queryGraphAllWorkspaceActivity, queryDataAgentActivity, queryWorkspaceActivity };

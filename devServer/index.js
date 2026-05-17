@@ -10,9 +10,19 @@ const spProvisioning = require('./spProvisioning');
 const { provisionDataAgent, httpRequest } = require('./dataAgentProvisioner');
 const { suggestLabels } = require('./labelSuggester');
 const { registerDqRoutes } = require('./dqRoutes');
-const accessManagement = require('./accessManagement');
 const purviewLogs = require('./purviewLogs');
 const oversharingReport = require('./oversharingReport');
+const expressRateLimit = require('express-rate-limit');
+
+// Default limiter for all /api/* routes (300 req/min/IP).
+// Prevents accidental loops/DoS from spamming Fabric/Graph APIs.
+const apiRateLimit = expressRateLimit({
+  windowMs: 60 * 1000,
+  max: 300,
+  message: { error: 'Too many API requests, please slow down.' },
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+});
 
 /**
  * Register dev server manifest APIs with an Express application
@@ -24,6 +34,9 @@ function registerDevServerApis(app) {
 
   console.log('*** Mounting Workload Backend API Stub ***');
   app.use('/workload', workloadApi);
+
+  // Apply rate limiting to all /api/* routes registered below
+  app.use('/api', apiRateLimit);
 
   // Check if Data Agent already exists
   app.get('/api/data-agent-status', async (req, res) => {
@@ -135,40 +148,6 @@ function registerDevServerApis(app) {
     }
   });
 
-  app.get('/api/access/audit-retention', async (_req, res) => {
-    try {
-      const days = await accessManagement.getAuditLogRetentionDays();
-      res.json({ days });
-    } catch (err) {
-      console.error('[AuditRetention] Error:', err.message);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.get('/api/access/roles', async (req, res) => {
-    const { workspaceId } = req.query;
-    if (!workspaceId) return res.status(400).json({ error: 'Query param "workspaceId" is required.' });
-    try {
-      const report = await accessManagement.buildAccessReport(workspaceId);
-      res.json(report);
-    } catch (err) {
-      console.error('[AccessRoles] Error:', err.message);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.delete('/api/access/group-member', async (req, res) => {
-    const { groupId, memberId } = req.query;
-    if (!groupId || !memberId) return res.status(400).json({ error: 'Query params "groupId" and "memberId" are required.' });
-    try {
-      await accessManagement.removeMemberFromGroup(groupId, memberId);
-      res.status(204).end();
-    } catch (err) {
-      console.error('[AccessRevoke] Error:', err.message);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
   app.get('/api/oversharing/report', async (req, res) => {
     const { workspaceId } = req.query;
     if (!workspaceId) return res.status(400).json({ error: 'Query param "workspaceId" is required.' });
@@ -207,38 +186,6 @@ function registerDevServerApis(app) {
       res.json({ records: report.entries, queryDays: report.queryDays, partial: report.partial });
     } catch (err) {
       console.error('[FabricAudit] Error:', err.message);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.get('/api/audit/data-agent-logs', async (req, res) => {
-    const { workspaceId, days } = req.query;
-    if (!workspaceId) return res.status(400).json({ error: 'Query param "workspaceId" is required.' });
-    const lookbackDays = days !== undefined ? Number(days) : 30;
-    if (isNaN(lookbackDays) || lookbackDays < 1 || lookbackDays > 365) {
-      return res.status(400).json({ error: 'Query param "days" must be an integer between 1 and 365.' });
-    }
-    try {
-      const report = await purviewLogs.queryDataAgentActivity(workspaceId, lookbackDays);
-      res.json(report);
-    } catch (err) {
-      console.error('[DataAgentLogs] Error:', err.message);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.get('/api/audit/workspace-activity', async (req, res) => {
-    const { workspaceId, days } = req.query;
-    if (!workspaceId) return res.status(400).json({ error: 'Query param "workspaceId" is required.' });
-    const lookbackDays = days !== undefined ? Number(days) : 30;
-    if (isNaN(lookbackDays) || lookbackDays < 1 || lookbackDays > 365) {
-      return res.status(400).json({ error: 'Query param "days" must be an integer between 1 and 365.' });
-    }
-    try {
-      const report = await purviewLogs.queryWorkspaceActivity(workspaceId, lookbackDays);
-      res.json(report);
-    } catch (err) {
-      console.error('[WorkspaceActivity] Error:', err.message);
       res.status(500).json({ error: err.message });
     }
   });
